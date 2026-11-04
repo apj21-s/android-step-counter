@@ -107,7 +107,7 @@
     if (reduce) return;
     const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
     cv.width = w * dpr; cv.height = h * dpr; g2.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const cx = w / 2, cy = h / 2, r = R * (290 / 300), cols = ['#DC143C', '#FF2D55', '#FF6B81', '#ffffff'];
+    const cx = w / 2, cy = h / 2, r = R * (290 / 300), cs = getComputedStyle(document.documentElement), cols = ['--crimson', '--neon', '--glow'].map(v => cs.getPropertyValue(v).trim()).concat('#ffffff');
     const parts = Array.from({ length: 96 }, (_, i) => {
       const a = Math.random() * Math.PI * 2, sp = 50 + Math.random() * 230;
       return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
@@ -367,6 +367,47 @@
       buzz();
     }
   });
+
+  // ---------- Accent colour (any colour) ----------
+  function hex2hsl(hex) {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+    let h = 0, s = 0;
+    if (mx !== mn) {
+      const d = mx - mn;
+      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      h = 60 * (mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4);
+    }
+    return [h, s * 100, l * 100];
+  }
+  function hsl2hex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+  }
+  function setAccent(hex) {
+    hex = hex.toLowerCase();
+    const [h, s, l] = hex2hsl(hex), base = hex === '#dc143c';
+    const a2 = base ? '#ff2d55' : hsl2hex(h, Math.min(100, s + 15), Math.min(l + 12, 74));
+    const glow = base ? '#ff6b81' : hsl2hex(h, Math.min(100, s + 10), Math.min(l + 24, 84));
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(a2.slice(i, i + 2), 16) / 255);
+    const rs = document.documentElement.style;
+    rs.setProperty('--crimson', hex); rs.setProperty('--neon', a2); rs.setProperty('--glow', glow);
+    rs.setProperty('--on-accent', 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.62 ? '#141414' : '#fff');
+    const preset = $$('.sw[data-c]').find(x => x.dataset.c.toLowerCase() === hex);
+    $$('.sw[data-c]').forEach(x => x.classList.toggle('on', x === preset));
+    const custom = $('.sw-custom');
+    custom.classList.toggle('on', !preset); custom.style.setProperty('--c', hex);
+    $('#accentName').textContent = preset ? preset.dataset.n : hex.toUpperCase();
+    $('#customColor').value = hex;
+    try { localStorage.setItem('stride-accent', hex); } catch (e) { /* storage blocked */ }
+  }
+  $$('.sw[data-c]').forEach(x => x.addEventListener('click', () => setAccent(x.dataset.c)));
+  $('#customColor').addEventListener('input', e => setAccent(e.target.value));
+  let savedAccent = null;
+  try { savedAccent = localStorage.getItem('stride-accent'); } catch (e) { /* storage blocked */ }
+  setAccent(/^#[0-9a-f]{6}$/i.test(savedAccent || '') ? savedAccent : '#DC143C');
 
   // ---------- Panel ----------
   let pending = 0, walkT = 0;

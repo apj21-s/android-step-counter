@@ -12,7 +12,7 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <linearGradient id="icoG" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FF2D55"/><stop offset="1" stop-color="#DC143C"/>
+      <stop offset="0" class="ga1"/><stop offset="1" class="ga2"/>
     </linearGradient>
     <symbol id="strideIcon" viewBox="0 0 64 64">
       <rect width="64" height="64" rx="16" fill="#121212"/>
@@ -53,7 +53,7 @@
                 <svg class="ring" viewBox="0 0 300 300" aria-hidden="true">
                   <defs>
                     <linearGradient id="rg" x1="0" y1="0" x2="1" y2="1">
-                      <stop offset="0" stop-color="#FF2D55"/><stop offset="1" stop-color="#DC143C"/>
+                      <stop offset="0" class="ga1"/><stop offset="1" class="ga2"/>
                     </linearGradient>
                     <filter id="blur" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="9"/></filter>
                   </defs>
@@ -122,6 +122,21 @@
                 <div class="row">
                   <div><div class="lbl">Height</div><div class="hint" id="strideHint">Stride 73 cm</div></div>
                   <div class="stepper"><button id="hMinus" aria-label="Shorter">−</button><span class="val" id="heightVal">175 cm</span><button id="hPlus" aria-label="Taller">+</button></div>
+                </div>
+              </div>
+              <div class="card group">
+                <div class="row col">
+                  <div class="row-top"><div class="lbl">Accent colour</div><div class="val" id="accentName">Crimson</div></div>
+                  <div class="swatches">
+                    <button class="sw" data-c="#DC143C" data-n="Crimson" style="--c:#DC143C" aria-label="Crimson"></button>
+                    <button class="sw" data-c="#F05A28" data-n="Ember" style="--c:#F05A28" aria-label="Ember"></button>
+                    <button class="sw" data-c="#E0A526" data-n="Gold" style="--c:#E0A526" aria-label="Gold"></button>
+                    <button class="sw" data-c="#1DB980" data-n="Emerald" style="--c:#1DB980" aria-label="Emerald"></button>
+                    <button class="sw" data-c="#2E90FA" data-n="Sky" style="--c:#2E90FA" aria-label="Sky"></button>
+                    <button class="sw" data-c="#7C5CFF" data-n="Violet" style="--c:#7C5CFF" aria-label="Violet"></button>
+                    <button class="sw" data-c="#E6488F" data-n="Rose" style="--c:#E6488F" aria-label="Rose"></button>
+                    <label class="sw sw-custom" aria-label="Custom colour"><input type="color" id="customColor" value="#dc143c"></label>
+                  </div>
                 </div>
               </div>
               <div class="card group">
