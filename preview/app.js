@@ -182,26 +182,35 @@
   }
 
   // ---------- Widgets (no animation, like real widgets) ----------
-  const RW = 2 * Math.PI * 40;
+  let tk2 = '';
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * 2 * Math.PI, r1 = 47.5, r2 = i % 3 ? 49 : 50;
+    tk2 += `<line x1="${50 + r1 * Math.sin(a)}" y1="${50 - r1 * Math.cos(a)}" x2="${50 + r2 * Math.sin(a)}" y2="${50 - r2 * Math.cos(a)}"/>`;
+  }
+  $$('.wb-ticks', home).forEach(g => { g.innerHTML = tk2; });
   function renderWidgets() {
-    const s = S.steps, pc = clamp(s / S.goal, 0, 1);
-    $$('.w-arc').forEach(c => { c.style.strokeDasharray = RW; c.style.strokeDashoffset = RW * (1 - pc); c.style.opacity = pc > 0.004 ? 1 : 0; });
+    const s = S.steps, pc = clamp(s / S.goal, 0, 1), vis = pc > 0.004 ? 1 : 0;
+    $$('.w-arc', home).forEach(c => {
+      const L = 2 * Math.PI * c.r.baseVal.value;
+      c.style.strokeDasharray = L; c.style.strokeDashoffset = L * (1 - pc); c.style.opacity = vis;
+    });
+    const a = pc * 2 * Math.PI - Math.PI / 2;
+    $$('.w-tip', home).forEach(t => {
+      const r = Number(t.dataset.r);
+      t.setAttribute('cx', 50 + r * Math.cos(a)); t.setAttribute('cy', 50 + r * Math.sin(a)); t.style.opacity = vis;
+    });
     const set = (k, v) => $$(`[data-w=${k}]`, home).forEach(e => { e.textContent = v; });
     set('steps', fmt(s)); set('goal', fmt(S.goal)); set('pct', Math.floor(s / S.goal * 100) + '%');
-    set('km', km(s).toFixed(1)); set('kcal', fmt(kcal(s))); set('streak', streak());
-    set('upd', S.live ? 'Live' : 'Updated every 15 min');
-    $$('[data-w=bar]', home).forEach(e => { e.style.width = pc * 100 + '%'; });
-    const wk = days().slice(-7), mx = Math.max(S.goal, ...wk.map(d => d.steps));
-    $$('.w-week', home).forEach(el => {
+    set('km', km(s).toFixed(1)); set('kcal', fmt(kcal(s)));
+    $$('[data-w=bar]', home).forEach(e => { e.style.width = pc * 100 + '%'; e.style.opacity = vis; });
+    const wk = days().slice(-7);
+    $$('.w-dots', home).forEach(el => {
       if (el.children.length !== 7) el.innerHTML = '<i></i>'.repeat(7);
       [...el.children].forEach((b, i) => {
-        b.style.height = Math.max(8, wk[i].steps / mx * 100) + '%';
         b.classList.toggle('hit', wk[i].steps >= S.goal);
         b.classList.toggle('now', !!wk[i].today);
       });
     });
-    $$('.w-weekx', home).forEach(el => { el.innerHTML = wk.map(d => `<span class="${d.today ? 'now' : ''}">${DAY[d.date.getDay()][0]}</span>`).join(''); });
-    home.classList.toggle('live-off', !S.live);
   }
   function renderNotif() {
     $('#notif').classList.toggle('off', !S.live);
