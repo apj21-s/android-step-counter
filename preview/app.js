@@ -8,6 +8,11 @@
   const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const app = $('#app'), home = $('#home');
+  const A = window.Android, DEVICE = !!A;
+  if (DEVICE) document.body.classList.add('device');
+  const readState = () => { try { return JSON.parse(A.state()); } catch (e) { return null; } };
+  const parseDay = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+  const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   // ---------- State: fake 40-day history so the charts have data ----------
   let seed = 11;
@@ -15,11 +20,24 @@
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   const S = { goal: 8000, height: 175, steps: 0, day: today0, history: [],
     live: true, amoled: false, haptics: true, auto: false, hit: new Set(), range: 7, view: 'today' };
-  for (let i = 40; i >= 1; i--) {
+  // On the phone, real data comes from the app; in the laptop preview, fake history.
+  function loadDevice(st) {
+    Object.assign(S, { goal: st.goal, height: st.height, live: st.live, amoled: st.amoled, haptics: st.haptics, steps: st.steps });
+    S.day = parseDay(st.today);
+    const map = new Map(st.history), first = parseDay(st.firstDay);
+    S.history = [];
+    for (let i = 60; i >= 1; i--) {
+      const d = new Date(S.day); d.setDate(d.getDate() - i);
+      if (d >= first) S.history.push({ date: d, steps: map.get(isoDay(d)) || 0 });
+    }
+  }
+  const DS = DEVICE ? readState() : null;
+  if (DS) loadDevice(DS);
+  else for (let i = 40; i >= 1; i--) {
     const d = new Date(today0); d.setDate(d.getDate() - i);
     S.history.push({ date: d, steps: Math.round(i <= 5 ? 8300 + rnd() * 4200 : 2200 + rnd() * 10800) });
   }
-  const START_STEPS = 5240;
+  const START_STEPS = DS ? DS.steps : 5240;
 
   // Estimates only: stride ≈ 0.415 × height, ~0.04 kcal per step, ~105 steps per active minute.
   const km = s => s * S.height * 0.415 / 100 / 1000;
@@ -140,7 +158,7 @@
   }
   function buzz(ms = 14) {
     if (!S.haptics) return;
-    try { navigator.vibrate && navigator.vibrate(ms); } catch (e) { /* unsupported */ }
+    try { if (DEVICE) A.vibrate(ms); else if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* unsupported */ }
     if (reduce) return;
     app.classList.remove('nudge'); void app.offsetWidth; app.classList.add('nudge');
   }
@@ -167,8 +185,10 @@
     $('#pctLabel').textContent = Math.floor(pc * 100) + '%';
     $('#streakChip').textContent = st + (st === 1 ? ' day' : ' days');
     $('#dateLabel').textContent = `${DAY[d.getDay()]} · ${d.getDate()} ${MON[d.getMonth()]}`;
-    $('#homeDate').textContent = `${DAY[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}`;
-    $('#calDay').textContent = d.getDate();
+    if (home) {
+      $('#homeDate').textContent = `${DAY[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}`;
+      $('#calDay').textContent = d.getDate();
+    }
     app.classList.toggle('done', s >= S.goal);
     app.classList.toggle('empty-state', s === 0);
     setRingTarget(pc);
@@ -177,8 +197,10 @@
     renderNotif();
     if (S.view === 'history') renderHistory(false);
     const sl = $('#stepSlider');
-    if (document.activeElement !== sl) { sl.value = Math.min(s, sl.max); fillRange(sl); }
-    $('#sliderVal').textContent = fmt(s);
+    if (sl) {
+      if (document.activeElement !== sl) { sl.value = Math.min(s, sl.max); fillRange(sl); }
+      $('#sliderVal').textContent = fmt(s);
+    }
   }
 
   // ---------- Widgets (no animation, like real widgets) ----------
@@ -187,8 +209,9 @@
     const a = i / 12 * 2 * Math.PI, r1 = 47.5, r2 = i % 3 ? 49 : 50;
     tk2 += `<line x1="${50 + r1 * Math.sin(a)}" y1="${50 - r1 * Math.cos(a)}" x2="${50 + r2 * Math.sin(a)}" y2="${50 - r2 * Math.cos(a)}"/>`;
   }
-  $$('.wb-ticks', home).forEach(g => { g.innerHTML = tk2; });
+  if (home) $$('.wb-ticks', home).forEach(g => { g.innerHTML = tk2; });
   function renderWidgets() {
+    if (!home) return;
     const s = S.steps, pc = clamp(s / S.goal, 0, 1), vis = pc > 0.004 ? 1 : 0;
     $$('.w-arc', home).forEach(c => {
       const L = 2 * Math.PI * c.r.baseVal.value;
@@ -213,6 +236,7 @@
     });
   }
   function renderNotif() {
+    if (!$('#notif')) return;
     $('#notif').classList.toggle('off', !S.live);
     $('#nText').textContent = `${fmt(S.steps)} steps · ${Math.floor(S.steps / S.goal * 100)}%`;
     $('#nBar').style.width = clamp(S.steps / S.goal, 0, 1) * 100 + '%';
@@ -315,7 +339,7 @@
     if (v === 'history') renderHistory(true);
   }
   $$('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.go)));
-  $$('.w', home).forEach(w => w.addEventListener('click', () => {
+  if (home) $$('.w', home).forEach(w => w.addEventListener('click', () => {
     go('today');
     if (!reduce) app.animate([{ transform: 'scale(.93)', opacity: 0.5 }, { transform: 'none', opacity: 1 }], { duration: 480, easing: 'cubic-bezier(.2,.9,.25,1)' });
   }));
@@ -327,12 +351,14 @@
     S.goal = Number(goalRange.value);
     $('#goalVal').textContent = fmt(S.goal);
     fillRange(goalRange);
+    if (DEVICE) A.setGoal(S.goal);
     render(true);
   });
   function setHeight(h) {
     S.height = clamp(h, 140, 210);
     $('#heightVal').textContent = S.height + ' cm';
     $('#strideHint').textContent = `Stride ${Math.round(S.height * 0.415)} cm`;
+    if (DEVICE) A.setHeight(S.height);
     render(true);
   }
   $('#hMinus').addEventListener('click', () => setHeight(S.height - 1));
@@ -344,6 +370,9 @@
     if (key === 'amoled') { app.classList.toggle('amoled', on); setSeg('theme', on ? 'amoled' : 'obsidian'); }
     if (key === 'auto') startWalker();
     if (key === 'live') { renderWidgets(); renderNotif(); }
+    if (DEVICE && key === 'live') A.setLive(on);
+    if (DEVICE && key === 'amoled') A.setAmoled(on);
+    if (DEVICE && key === 'haptics') A.setHaptics(on);
   }
   $$('.switch').forEach(sw => sw.addEventListener('click', () => setSwitch(sw.dataset.key, sw.getAttribute('aria-checked') !== 'true')));
 
@@ -354,9 +383,12 @@
     if (!testRun) {
       testRun = true; testCount = 0; testTarget = 96 + Math.floor(Math.random() * 5);
       $('#testCount').textContent = '0'; res.textContent = ''; res.className = 't-result';
-      $('#testStatus').textContent = 'Walking… tap Stop after your 100th step.';
+      $('#testStatus').textContent = DEVICE ? 'Walk 100 steps, pause a moment, then tap Stop.' : 'Walking… tap Stop after your 100th step.';
       btn.textContent = 'Stop';
-      testT = setInterval(() => { if (testCount < testTarget) $('#testCount').textContent = ++testCount; }, reduce ? 5 : 55);
+      if (DEVICE) {
+        const base = readState().total;
+        testT = setInterval(() => { const st = readState(); if (st) $('#testCount').textContent = testCount = st.total - base; }, 300);
+      } else testT = setInterval(() => { if (testCount < testTarget) $('#testCount').textContent = ++testCount; }, reduce ? 5 : 55);
     } else {
       clearInterval(testT); testRun = false;
       const acc = Math.max(0, 100 - Math.abs(testCount - 100));
@@ -402,14 +434,16 @@
     $('#accentName').textContent = preset ? preset.dataset.n : hex.toUpperCase();
     $('#customColor').value = hex;
     try { localStorage.setItem('stride-accent', hex); } catch (e) { /* storage blocked */ }
+    if (DEVICE) A.setAccent(hex, a2, glow);
   }
   $$('.sw[data-c]').forEach(x => x.addEventListener('click', () => setAccent(x.dataset.c)));
   $('#customColor').addEventListener('input', e => setAccent(e.target.value));
   let savedAccent = null;
   try { savedAccent = localStorage.getItem('stride-accent'); } catch (e) { /* storage blocked */ }
-  setAccent(/^#[0-9a-f]{6}$/i.test(savedAccent || '') ? savedAccent : '#DC143C');
+  setAccent(DS ? DS.accent : /^#[0-9a-f]{6}$/i.test(savedAccent || '') ? savedAccent : '#DC143C');
 
-  // ---------- Panel ----------
+  // ---------- Panel (laptop preview only) ----------
+  if (!DEVICE) {
   let pending = 0, walkT = 0;
   function startWalker() { if (!walkT && (pending > 0 || S.auto)) walkT = setInterval(walkTick, 90); }
   function walkTick() {
@@ -434,6 +468,7 @@
     toast('<span class="tdot"></span><span>New day · counter reset at midnight</span>');
   });
   $('#resetDay').addEventListener('click', () => { S.steps = 0; pending = 0; render(true); });
+  }
 
   function setSeg(group, val) { $$(`.pseg[data-group=${group}] button`).forEach(b => b.classList.toggle('on', b.dataset.val === val)); }
   $$('.pseg').forEach(seg => seg.addEventListener('click', e => {
@@ -441,8 +476,9 @@
     const g = seg.dataset.group, v = b.dataset.val;
     setSeg(g, v);
     if (g === 'theme') setSwitch('amoled', v === 'amoled');
-    if (g === 'wstyle') home.className = home.className.replace(/\bws-\w+/, 'ws-' + v);
-    if (g === 'wall') home.className = home.className.replace(/\bwp-\w+/, 'wp-' + v);
+    if (g === 'wstyle' && home) home.className = home.className.replace(/\bws-\w+/, 'ws-' + v);
+    if (g === 'wall' && home) home.className = home.className.replace(/\bwp-\w+/, 'wp-' + v);
+    if (g === 'wstyle' && DEVICE) A.setWidgetStyle(v);
   }));
 
   // ---------- Splash ----------
@@ -452,7 +488,7 @@
     sp.classList.remove('hide');
     setTimeout(() => { sp.classList.add('hide'); then(); }, reduce ? 150 : 1500);
   }
-  $('#replay').addEventListener('click', () => {
+  if ($('#replay')) $('#replay').addEventListener('click', () => {
     go('today');
     ring.p = 0; ring.v = 0; drawRing(0);
     $$('.roll', app).forEach(el => { el.textContent = ''; el.dataset.v = ''; });
@@ -471,6 +507,36 @@
   addEventListener('resize', fit);
   fit(); clock(); setInterval(clock, 15000);
   fillRange(goalRange);
+
+  // ---------- Phone: settings from storage, live updates, notices ----------
+  function notice(st) {
+    const n = $('#notice');
+    const msg = !st.hasSensor ? "This phone has no step-counter chip, so Stride can't count steps."
+      : !st.permission ? 'Allow Physical activity so Stride can count your steps.' : '';
+    n.classList.toggle('show', !!msg);
+    $('#noticeText').textContent = msg;
+    $('#noticeBtn').style.display = st.hasSensor && !st.permission ? '' : 'none';
+    let ok = false; try { ok = A.batteryOk(); } catch (e) { /* older bridge */ }
+    $('#batteryBtn').textContent = ok ? 'On' : 'Allow';
+    $('#batteryBtn').disabled = ok;
+  }
+  if (DEVICE) {
+    goalRange.value = S.goal; $('#goalVal').textContent = fmt(S.goal); fillRange(goalRange);
+    $('#heightVal').textContent = S.height + ' cm';
+    $('#strideHint').textContent = `Stride ${Math.round(S.height * 0.415)} cm`;
+    for (const k of ['live', 'amoled', 'haptics']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
+    app.classList.toggle('amoled', S.amoled); setSeg('theme', S.amoled ? 'amoled' : 'obsidian');
+    setSeg('wstyle', DS.wstyle);
+    $('#noticeBtn').addEventListener('click', () => A.requestPermission());
+    $('#batteryBtn').addEventListener('click', () => A.batteryExempt());
+    notice(DS);
+    setInterval(() => {
+      const st = readState(); if (!st) return;
+      notice(st);
+      if (st.today !== isoDay(S.day)) { loadDevice(st); S.hit.clear(); render(true); if (S.view === 'history') renderHistory(true); return; }
+      if (st.steps !== S.steps) { S.steps = st.steps; render(); }
+    }, 1000);
+  }
 
   // ---------- Boot ----------
   render(true);
