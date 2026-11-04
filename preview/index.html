@@ -151,6 +151,10 @@
                   <button class="switch" role="switch" data-key="live" aria-checked="true" aria-label="Live widget"></button>
                 </div>
                 <div class="row">
+                  <div><div class="lbl">Max accuracy</div><div class="hint">Extra motion check when the phone is held steady · uses a little more battery</div></div>
+                  <button class="switch" role="switch" data-key="boost" aria-checked="true" aria-label="Max accuracy"></button>
+                </div>
+                <div class="row">
                   <div><div class="lbl">AMOLED black</div><div class="hint">Pure black, saves battery</div></div>
                   <button class="switch" role="switch" data-key="amoled" aria-checked="false" aria-label="AMOLED black"></button>
                 </div>
@@ -168,6 +172,7 @@
                 <div class="tc" id="testCount">0</div>
                 <div class="t-status" id="testStatus">Walk exactly 100 steps to see how accurate your phone is.</div>
                 <div class="t-result" id="testResult"></div>
+                <div class="hint device-only" id="testDebug"></div>
                 <button class="btn primary" id="testBtn">Start 100-step test</button>
                 <div class="hint preview-only">Simulated in this preview</div>
               </div>

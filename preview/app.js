@@ -19,10 +19,10 @@
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   const S = { goal: 8000, height: 175, steps: 0, day: today0, history: [],
-    live: true, amoled: false, haptics: true, auto: false, hit: new Set(), range: 7, view: 'today' };
+    live: true, amoled: false, haptics: true, boost: true, auto: false, hit: new Set(), range: 7, view: 'today' };
   // On the phone, real data comes from the app; in the laptop preview, fake history.
   function loadDevice(st) {
-    Object.assign(S, { goal: st.goal, height: st.height, live: st.live, amoled: st.amoled, haptics: st.haptics, steps: st.steps });
+    Object.assign(S, { goal: st.goal, height: st.height, live: st.live, amoled: st.amoled, haptics: st.haptics, boost: st.boost, steps: st.steps });
     S.day = parseDay(st.today);
     const map = new Map(st.history), first = parseDay(st.firstDay);
     S.history = [];
@@ -373,6 +373,7 @@
     if (DEVICE && key === 'live') A.setLive(on);
     if (DEVICE && key === 'amoled') A.setAmoled(on);
     if (DEVICE && key === 'haptics') A.setHaptics(on);
+    if (DEVICE && key === 'boost') A.setBoost(on);
   }
   $$('.switch').forEach(sw => sw.addEventListener('click', () => setSwitch(sw.dataset.key, sw.getAttribute('aria-checked') !== 'true')));
 
@@ -387,7 +388,7 @@
       btn.textContent = 'Stop';
       if (DEVICE) {
         const base = readState().total;
-        testT = setInterval(() => { const st = readState(); if (st) $('#testCount').textContent = testCount = st.total - base; }, 300);
+        testT = setInterval(() => { const st = readState(); if (st) { $('#testCount').textContent = testCount = st.total - base; $('#testDebug').textContent = st.debug; } }, 300);
       } else testT = setInterval(() => { if (testCount < testTarget) $('#testCount').textContent = ++testCount; }, reduce ? 5 : 55);
     } else {
       clearInterval(testT); testRun = false;
@@ -524,7 +525,7 @@
     goalRange.value = S.goal; $('#goalVal').textContent = fmt(S.goal); fillRange(goalRange);
     $('#heightVal').textContent = S.height + ' cm';
     $('#strideHint').textContent = `Stride ${Math.round(S.height * 0.415)} cm`;
-    for (const k of ['live', 'amoled', 'haptics']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
+    for (const k of ['live', 'amoled', 'haptics', 'boost']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
     app.classList.toggle('amoled', S.amoled); setSeg('theme', S.amoled ? 'amoled' : 'obsidian');
     setSeg('wstyle', DS.wstyle);
     $('#noticeBtn').addEventListener('click', () => A.requestPermission());
@@ -534,9 +535,26 @@
       const st = readState(); if (!st) return;
       notice(st);
       if (st.today !== isoDay(S.day)) { loadDevice(st); S.hit.clear(); render(true); if (S.view === 'history') renderHistory(true); return; }
-      if (st.steps !== S.steps) { S.steps = st.steps; render(); }
+      stepTo(st.steps);
     }, 1000);
   }
+
+  // Count up one step at a time instead of jumping in batches.
+  let target = S.steps, tweenT = 0;
+  function stepTo(n) {
+    target = n;
+    if (n < S.steps || n - S.steps > 400) { clearTimeout(tweenT); tweenT = 0; S.steps = n; render(); return; }
+    if (!tweenT && n > S.steps) tweenT = setTimeout(tweenTick, 0);
+  }
+  function tweenTick() {
+    tweenT = 0;
+    if (S.steps >= target) return;
+    S.steps++;
+    render();
+    const left = target - S.steps;
+    if (left > 0) tweenT = setTimeout(tweenTick, clamp(900 / left, 35, 320));
+  }
+  window.onSteps = n => stepTo(Number(n));
 
   // ---------- Boot ----------
   render(true);

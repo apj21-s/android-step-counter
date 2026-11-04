@@ -7,8 +7,6 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Build;
@@ -24,10 +22,9 @@ import android.webkit.WebView;
 import android.widget.FrameLayout;
 
 /** Shows the app screens (the approved web design) and connects them to the step sensor. */
-public class MainActivity extends Activity implements SensorEventListener {
+public class MainActivity extends Activity {
     private WebView web;
     private FrameLayout root;
-    private SensorManager sm;
     private Sensor sensor;
 
     @Override protected void onCreate(Bundle b) {
@@ -51,30 +48,23 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
         web.loadUrl("file:///android_asset/www/index.html");
 
-        sm = getSystemService(SensorManager.class);
-        sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+        sensor = getSystemService(SensorManager.class).getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
         RefreshReceiver.schedule(this);
         if (!StepService.hasPermission(this)) askPermission();
     }
 
     @Override protected void onResume() {
         super.onResume();
-        listen();
+        StepEngine.acquire(this);
+        StepEngine.listener = n -> web.evaluateJavascript("window.onSteps&&onSteps(" + n + ")", null);
         StepService.start(this);
     }
 
     @Override protected void onPause() {
-        sm.unregisterListener(this);
+        StepEngine.listener = null;
+        StepEngine.release(this);
         super.onPause();
     }
-
-    private void listen() {
-        if (sensor != null && StepService.hasPermission(this))
-            sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI);
-    }
-
-    @Override public void onSensorChanged(SensorEvent e) { StepService.ingest(this, (long) e.values[0]); }
-    @Override public void onAccuracyChanged(Sensor s, int a) { }
 
     private void askPermission() {
         SharedPreferences p = StepStore.prefs(this);
@@ -92,7 +82,15 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     @Override public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
-        if (StepService.hasPermission(this)) { listen(); StepService.start(this); }
+        if (!StepService.hasPermission(this)) return;
+        StepEngine.ensure(this);
+        StepService.start(this);
+        // Ask once to be left alone by battery saving, so counting never pauses.
+        SharedPreferences p = StepStore.prefs(this);
+        if (!p.getBoolean("askedBattery", false) && !getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName())) {
+            p.edit().putBoolean("askedBattery", true).apply();
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+        }
     }
 
     private void applyBackground() {
@@ -109,11 +107,15 @@ public class MainActivity extends Activity implements SensorEventListener {
         private void changed() { Widgets.updateAll(MainActivity.this); StepService.refresh(); }
 
         @JavascriptInterface public String state() {
-            return StepStore.stateJson(MainActivity.this, sensor != null, StepService.hasPermission(MainActivity.this));
+            return StepStore.stateJson(MainActivity.this, sensor != null, StepService.hasPermission(MainActivity.this), StepEngine.debug());
         }
         @JavascriptInterface public void setGoal(int g) { edit().putInt("goal", Math.max(500, Math.min(100000, g))).apply(); changed(); }
         @JavascriptInterface public void setHeight(int h) { edit().putInt("height", Math.max(100, Math.min(250, h))).apply(); changed(); }
         @JavascriptInterface public void setHaptics(boolean on) { edit().putBoolean("haptics", on).apply(); }
+        @JavascriptInterface public void setBoost(boolean on) {
+            edit().putBoolean("boost", on).apply();
+            runOnUiThread(() -> StepEngine.reconfigure(MainActivity.this));
+        }
         @JavascriptInterface public void setWidgetStyle(String s) { edit().putString("wstyle", s).apply(); changed(); }
         @JavascriptInterface public void setAccent(String hex, String a2, String glow) {
             try {

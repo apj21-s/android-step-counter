@@ -29,21 +29,30 @@ public final class StepStore {
 
     static String today() { return LocalDate.now().toString(); }
 
-    /** Feed one raw sensor value. Returns true when today's count changed. */
-    static synchronized boolean onRaw(Context c, long raw) {
+    /** Feed one raw sensor value. Returns how many steps were added. */
+    static synchronized long onRaw(Context c, long raw) {
         SharedPreferences p = prefs(c);
         rollIfNeeded(c);
         long last = p.getLong("lastRaw", -1);
         SharedPreferences.Editor e = p.edit().putLong("lastRaw", raw);
         if (!p.contains("firstDay")) e.putString("firstDay", today());
-        if (last < 0) { e.apply(); return false; }      // first reading: nothing to add yet
+        if (last < 0) { e.apply(); return 0; }          // first reading: nothing to add yet
         long delta = raw - last;
         if (delta < 0) delta = raw;                       // phone rebooted: sensor restarted at 0
-        if (delta == 0) { e.apply(); return false; }
+        if (delta == 0) { e.apply(); return 0; }
         e.putLong("steps", p.getLong("steps", 0) + delta)
          .putLong("total", p.getLong("total", 0) + delta)
          .apply();
-        return true;
+        return delta;
+    }
+
+    /** Add (or take back, if negative) steps found by the motion detector. */
+    static synchronized void addSteps(Context c, long n) {
+        if (n == 0) return;
+        rollIfNeeded(c);
+        SharedPreferences p = prefs(c);
+        p.edit().putLong("steps", Math.max(0, p.getLong("steps", 0) + n))
+                .putLong("total", Math.max(0, p.getLong("total", 0) + n)).apply();
     }
 
     /** Close out yesterday when the date changes. Returns true if it rolled. */
@@ -76,6 +85,7 @@ public final class StepStore {
     static int goal(Context c) { return prefs(c).getInt("goal", 8000); }
     static int height(Context c) { return prefs(c).getInt("height", 175); }
     static boolean live(Context c) { return prefs(c).getBoolean("live", true); }
+    static boolean boost(Context c) { return prefs(c).getBoolean("boost", true); }
     static String style(Context c) { return prefs(c).getString("wstyle", "obsidian"); }
     static int a1(Context c) { return prefs(c).getInt("a1", 0xFFDC143C); }
     static int a2(Context c) { return prefs(c).getInt("a2", 0xFFFF2D55); }
@@ -88,18 +98,19 @@ public final class StepStore {
         JSONObject h = history(prefs(c));
         long[] w = new long[7];
         for (int i = 0; i < 6; i++) w[i] = h.optLong(LocalDate.now().minusDays(6 - i).toString(), 0);
-        w[6] = steps(c);
+        w[6] = StepEngine.display(c);
         return w;
     }
 
     /** Everything the app screen needs, as JSON. */
-    static String stateJson(Context c, boolean hasSensor, boolean permission) {
+    static String stateJson(Context c, boolean hasSensor, boolean permission, String debug) {
         rollIfNeeded(c);
         SharedPreferences p = prefs(c);
         try {
             JSONObject o = new JSONObject();
-            o.put("steps", p.getLong("steps", 0));
-            o.put("total", p.getLong("total", 0));
+            o.put("steps", StepEngine.display(c));
+            o.put("total", StepEngine.displayTotal(c));
+            o.put("debug", debug);
             o.put("today", today());
             o.put("firstDay", p.getString("firstDay", today()));
             o.put("goal", goal(c));
@@ -107,6 +118,7 @@ public final class StepStore {
             o.put("live", live(c));
             o.put("amoled", p.getBoolean("amoled", false));
             o.put("haptics", p.getBoolean("haptics", true));
+            o.put("boost", boost(c));
             o.put("wstyle", style(c));
             o.put("accent", p.getString("accent", "#dc143c"));
             o.put("hasSensor", hasSensor);
