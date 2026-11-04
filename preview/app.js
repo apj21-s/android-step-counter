@@ -530,6 +530,7 @@
     setSeg('wstyle', DS.wstyle);
     $('#noticeBtn').addEventListener('click', () => A.requestPermission());
     $('#batteryBtn').addEventListener('click', () => A.batteryExempt());
+    $('#guideBtn').addEventListener('click', () => A.openBatteryGuide());
     notice(DS);
     setInterval(() => {
       const st = readState(); if (!st) return;

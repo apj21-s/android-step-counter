@@ -31,6 +31,7 @@ public class RefreshReceiver extends BroadcastReceiver {
             schedule(c);
             StepService.start(c);
         }
+        StepService.start(c);                     // watchdog: no-op if already running
         if (StepStore.rollIfNeeded(c)) StepService.refresh();
 
         // Live mode: the service already listens. Otherwise take one quick reading.

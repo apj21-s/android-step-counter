@@ -138,6 +138,10 @@ public class MainActivity extends Activity {
             Vibrator v = getSystemService(Vibrator.class);
             if (v != null && v.hasVibrator()) v.vibrate(VibrationEffect.createOneShot(Math.max(1, ms), VibrationEffect.DEFAULT_AMPLITUDE));
         }
+        @JavascriptInterface public void openBatteryGuide() {
+            String brand = Build.MANUFACTURER.toLowerCase(java.util.Locale.US).replaceAll("[^a-z]", "");
+            runOnUiThread(() -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://dontkillmyapp.com/" + brand))));
+        }
         @JavascriptInterface public void requestPermission() { runOnUiThread(MainActivity.this::askPermission); }
         @JavascriptInterface public boolean batteryOk() {
             return getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName());
