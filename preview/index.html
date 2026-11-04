@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stride preview</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="icoG" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF2D55"/><stop offset="1" stop-color="#DC143C"/>
+    </linearGradient>
+    <symbol id="strideIcon" viewBox="0 0 64 64">
+      <rect width="64" height="64" rx="16" fill="#121212"/>
+      <rect x=".5" y=".5" width="63" height="63" rx="15.5" fill="none" stroke="rgba(255,255,255,.1)"/>
+      <circle cx="32" cy="32" r="21" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4.5"/>
+      <circle cx="32" cy="32" r="21" fill="none" stroke="url(#icoG)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="99 132" transform="rotate(-90 32 32)"/>
+      <g fill="url(#icoG)">
+        <ellipse cx="27.6" cy="36" rx="3.3" ry="5.4" transform="rotate(-8 27.6 36)"/>
+        <circle cx="25.4" cy="28.6" r="1.15"/><circle cx="27.7" cy="27.9" r="1.05"/><circle cx="29.8" cy="28.7" r=".95"/>
+        <ellipse cx="36.4" cy="29.5" rx="3.3" ry="5.4" transform="rotate(8 36.4 29.5)"/>
+        <circle cx="34.4" cy="22.2" r=".95"/><circle cx="36.5" cy="21.4" r="1.05"/><circle cx="38.8" cy="22" r="1.15"/>
+      </g>
+    </symbol>
+    <symbol id="flame" viewBox="0 0 24 24">
+      <path d="M12 2.5c.6 3.2 4.8 5 4.8 10.1a4.8 4.8 0 0 1-9.6 0c0-2 1-3.4 2.1-4.3.1 1.6.9 2.6 1.9 3C10.9 8.6 11 5.4 12 2.5z" fill="currentColor"/>
+    </symbol>
+  </defs>
+</svg>
+
+<main class="stage">
+
+  <section class="device-col">
+    <div class="caption">App</div>
+    <div class="phone-box">
+      <div class="phone">
+        <div class="screen app" id="app">
+          <div class="island"></div>
+          <div class="statusbar"><span class="sb-time">9:41</span><span class="sb-icons"><i class="sig"></i><i class="bat"></i></span></div>
+          <div class="bg-glow" id="bgGlow"></div>
+
+          <div class="views">
+            <section class="view active" data-view="today">
+              <header class="head">
+                <div><div class="eyebrow" id="dateLabel"></div><h1>Today</h1></div>
+                <div class="chip"><svg><use href="#flame"/></svg><span id="streakChip"></span></div>
+              </header>
+              <div class="ring-wrap">
+                <svg class="ring" viewBox="0 0 300 300" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="rg" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stop-color="#FF2D55"/><stop offset="1" stop-color="#DC143C"/>
+                    </linearGradient>
+                    <filter id="blur" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="9"/></filter>
+                  </defs>
+                  <g class="ticks" id="ticks"></g>
+                  <circle class="track" cx="150" cy="150" r="128" fill="none" stroke-width="16"/>
+                  <circle class="arc-glow" id="arcGlow" cx="150" cy="150" r="128" fill="none" stroke="url(#rg)" stroke-width="16" stroke-linecap="round" transform="rotate(-90 150 150)"/>
+                  <circle id="arc" cx="150" cy="150" r="128" fill="none" stroke="url(#rg)" stroke-width="16" stroke-linecap="round" transform="rotate(-90 150 150)"/>
+                  <circle class="tip-pulse" id="tipPulse" cx="150" cy="22" r="7" fill="#FF6B81"/>
+                  <circle id="tip" cx="150" cy="22" r="4.5" fill="#fff"/>
+                </svg>
+                <canvas class="burst" id="burst"></canvas>
+                <div class="ring-center">
+                  <div class="eyebrow">Steps</div>
+                  <div class="big roll" id="stepCount"></div>
+                  <div class="sub">of <b id="goalLabel"></b> · <span id="pctLabel"></span></div>
+                </div>
+              </div>
+              <div class="stats">
+                <div class="card stat">
+                  <svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h6.5a3.5 3.5 0 0 0 0-7h-5a3.5 3.5 0 0 1 0-7H16"/></svg>
+                  <div class="v roll" id="kmV"></div><div class="u">KM</div>
+                </div>
+                <div class="card stat">
+                  <svg viewBox="0 0 24 24"><path d="M12 2.5c.6 3.2 4.8 5 4.8 10.1a4.8 4.8 0 0 1-9.6 0c0-2 1-3.4 2.1-4.3.1 1.6.9 2.6 1.9 3C10.9 8.6 11 5.4 12 2.5z"/></svg>
+                  <div class="v roll" id="kcalV"></div><div class="u">KCAL</div>
+                </div>
+                <div class="card stat">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2.5h4"/></svg>
+                  <div class="v roll" id="minV"></div><div class="u">ACTIVE MIN</div>
+                </div>
+              </div>
+              <div class="card empty">Take a walk — your first steps show up here.</div>
+            </section>
+
+            <section class="view" data-view="history">
+              <header class="head"><div><div class="eyebrow" id="hRangeLabel"></div><h1>History</h1></div></header>
+              <div class="seg" id="rangeSeg">
+                <span class="seg-ind"></span>
+                <button class="on" data-range="7">7 days</button>
+                <button data-range="30">30 days</button>
+              </div>
+              <div class="card chart-card">
+                <div class="chart" id="chart"><div class="goal-line" id="goalLine"><span>GOAL</span></div></div>
+                <div class="chart-x" id="chartX"></div>
+                <div class="bartip" id="barTip"></div>
+              </div>
+              <div class="trio">
+                <div class="card"><div class="u">STREAK</div><div class="v"><span id="hStreak"></span> <small>days</small></div></div>
+                <div class="card"><div class="u">BEST DAY</div><div class="v" id="hBest"></div></div>
+                <div class="card"><div class="u">DAILY AVG</div><div class="v" id="hAvg"></div></div>
+              </div>
+              <div class="card heat-card">
+                <div class="heat-head"><span class="eyebrow" id="heatTitle"></span>
+                  <span class="legend">Less <i class="c"></i><i class="c l1"></i><i class="c l2"></i><i class="c l3"></i><i class="c l4"></i> More</span></div>
+                <div class="heat" id="heat"></div>
+              </div>
+            </section>
+
+            <section class="view" data-view="settings">
+              <header class="head"><div><div class="eyebrow">Make it yours</div><h1>Settings</h1></div></header>
+              <div class="card group">
+                <div class="row col">
+                  <div class="row-top"><div class="lbl">Daily goal</div><div class="val" id="goalVal">8,000</div></div>
+                  <input type="range" id="goalRange" min="2000" max="20000" step="500" value="8000" aria-label="Daily goal">
+                </div>
+                <div class="row">
+                  <div><div class="lbl">Height</div><div class="hint" id="strideHint">Stride 73 cm</div></div>
+                  <div class="stepper"><button id="hMinus" aria-label="Shorter">−</button><span class="val" id="heightVal">175 cm</span><button id="hPlus" aria-label="Taller">+</button></div>
+                </div>
+              </div>
+              <div class="card group">
+                <div class="row">
+                  <div><div class="lbl">Live widget</div><div class="hint">Updates as you walk · small notification</div></div>
+                  <button class="switch" role="switch" data-key="live" aria-checked="true" aria-label="Live widget"></button>
+                </div>
+                <div class="row">
+                  <div><div class="lbl">AMOLED black</div><div class="hint">Pure black, saves battery</div></div>
+                  <button class="switch" role="switch" data-key="amoled" aria-checked="false" aria-label="AMOLED black"></button>
+                </div>
+                <div class="row">
+                  <div><div class="lbl">Milestone vibrations</div><div class="hint">At 25, 50, 75 and 100%</div></div>
+                  <button class="switch" role="switch" data-key="haptics" aria-checked="true" aria-label="Milestone vibrations"></button>
+                </div>
+              </div>
+              <div class="card test">
+                <div class="eyebrow">Accuracy check</div>
+                <div class="tc" id="testCount">0</div>
+                <div class="t-status" id="testStatus">Walk exactly 100 steps to see how accurate your phone is.</div>
+                <div class="t-result" id="testResult"></div>
+                <button class="btn primary" id="testBtn">Start 100-step test</button>
+                <div class="hint">Simulated in this preview</div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tabbar">
+            <span class="tab-ind"></span>
+            <button class="tab on" data-go="today"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" opacity=".35"/><path d="M12 4a8 8 0 0 1 8 8"/></svg>Today</button>
+            <button class="tab" data-go="history"><svg viewBox="0 0 24 24"><path d="M5 20V12M10 20V6M15 20v-9M20 20V9"/></svg>History</button>
+            <button class="tab" data-go="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+          </nav>
+          <div class="home-ind"></div>
+          <div class="toast" id="toast"></div>
+          <div class="splash" id="splash">
+            <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="8"/>
+              <circle class="s-arc" cx="60" cy="60" r="48" fill="none" stroke="url(#icoG)" stroke-width="8" stroke-linecap="round" transform="rotate(-90 60 60)"/></svg>
+            <div class="splash-word">Stride</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="device-col">
+    <div class="caption">Home screen widgets</div>
+    <div class="phone-box">
+      <div class="phone">
+        <div class="screen home wp-crimson ws-obsidian" id="home">
+          <div class="island"></div>
+          <div class="statusbar"><span class="sb-time">9:41</span><span class="sb-icons"><i class="sig"></i><i class="bat"></i></span></div>
+          <div class="home-clock"><div class="hc-time sb-time">9:41</div><div class="hc-date" id="homeDate"></div></div>
+          <div class="home-grid">
+            <button class="w w-ring" style="grid-column:1/3;grid-row:1/3" aria-label="Ring widget">
+              <svg viewBox="0 0 100 100"><defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="wg1"/><stop offset="1" class="wg2"/></linearGradient></defs><circle cx="50" cy="50" r="40" fill="none" class="w-track" stroke-width="8"/>
+                <circle cx="50" cy="50" r="40" fill="none" class="w-arc" stroke="url(#wg)" stroke-width="8" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+              <div class="wr-center"><div class="wr-n" data-w="steps"></div><div class="wr-l">of <span data-w="goal"></span></div></div>
+              <div class="wr-streak"><svg><use href="#flame"/></svg><span data-w="streak"></span></div>
+            </button>
+            <button class="w w-min" style="grid-column:3/5;grid-row:1" aria-label="Minimal widget">
+              <div class="wm-n" data-w="steps"></div>
+              <div class="wm-line"><i data-w="bar"></i></div>
+              <div class="wm-l">steps · <span data-w="pct"></span></div>
+            </button>
+            <div class="icon" style="grid-column:3;grid-row:2"><svg class="ico"><use href="#strideIcon"/></svg>Stride</div>
+            <div class="icon" style="grid-column:4;grid-row:2"><span class="ico ico-cal"><b id="calDay">5</b></span>Calendar</div>
+            <button class="w w-wide" style="grid-column:1/5;grid-row:3" aria-label="Wide widget">
+              <div class="ww-left">
+                <div class="ww-n"><span data-w="steps"></span> <small>steps</small></div>
+                <div class="ww-bar"><i data-w="bar"></i></div>
+              </div>
+              <div class="w-week"></div>
+            </button>
+            <button class="w w-big" style="grid-column:1/5;grid-row:4/6" aria-label="Big widget">
+              <div class="wb-ring">
+                <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" class="w-track" stroke-width="8"/>
+                  <circle cx="50" cy="50" r="40" fill="none" class="w-arc" stroke="url(#wg)" stroke-width="8" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>
+                <div class="wr-center"><div class="wb-n" data-w="steps"></div><div class="wr-l" data-w="pct"></div></div>
+              </div>
+              <div class="wb-right">
+                <div class="wb-stats">
+                  <div><b data-w="km"></b><span>KM</span></div>
+                  <div><b data-w="kcal"></b><span>KCAL</span></div>
+                  <div><b data-w="streak"></b><span>STREAK</span></div>
+                </div>
+                <div class="w-week tall"></div>
+                <div class="w-weekx"></div>
+                <div class="wb-upd"><i></i><span data-w="upd"></span></div>
+              </div>
+            </button>
+          </div>
+          <div class="dock">
+            <span class="ico ico-phone"><svg viewBox="0 0 24 24"><path d="M6.6 3.5l2.6.4 1.2 3.6-1.9 1.6a12 12 0 0 0 6.4 6.4l1.6-1.9 3.6 1.2.4 2.6a2 2 0 0 1-2.1 2.2A17 17 0 0 1 4.4 5.6a2 2 0 0 1 2.2-2.1z"/></svg></span>
+            <span class="ico ico-msg"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></span>
+            <span class="ico ico-cam"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.6"/><path d="M8.5 7l1.5-2.5h4L15.5 7"/></svg></span>
+            <span class="ico ico-web"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.8 3 2.8 14 0 17M12 3.5c-2.8 3-2.8 14 0 17"/></svg></span>
+          </div>
+          <div class="home-ind"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="brand">
+      <svg class="brand-ico"><use href="#strideIcon"/></svg>
+      <div><div class="pt">Stride</div><div class="ps">Design preview</div></div>
+    </div>
+    <section>
+      <div class="plabel">Simulate walking</div>
+      <div class="prow">
+        <button class="btn primary" id="walkBtn">Walk 50 steps</button>
+        <button class="btn ghost" id="goalBtn">Jump to goal</button>
+      </div>
+      <div class="prow between">
+        <span>Auto-walk <em>fast-forward</em></span>
+        <button class="switch" role="switch" data-key="auto" aria-checked="false" aria-label="Auto-walk"></button>
+      </div>
+      <div class="slider-row">
+        <input type="range" id="stepSlider" min="0" max="16000" step="10" value="0" aria-label="Steps today">
+        <span id="sliderVal">0</span>
+      </div>
+      <div class="prow">
+        <button class="btn ghost" id="nextDay">Next day →</button>
+        <button class="btn ghost" id="resetDay">Reset today</button>
+      </div>
+    </section>
+    <section>
+      <div class="plabel">App theme</div>
+      <div class="pseg" data-group="theme">
+        <button class="on" data-val="obsidian">Obsidian</button>
+        <button data-val="amoled">AMOLED</button>
+      </div>
+    </section>
+    <section>
+      <div class="plabel">Widget style</div>
+      <div class="pseg four" data-group="wstyle">
+        <button class="on" data-val="obsidian">Obsidian</button>
+        <button data-val="amoled">AMOLED</button>
+        <button data-val="frosted">Frosted</button>
+        <button data-val="you">Wallpaper</button>
+      </div>
+    </section>
+    <section>
+      <div class="plabel">Wallpaper</div>
+      <div class="pseg three" data-group="wall">
+        <button class="on" data-val="crimson">Crimson</button>
+        <button data-val="midnight">Midnight</button>
+        <button data-val="dune">Dune</button>
+      </div>
+    </section>
+    <section>
+      <div class="plabel">Notification</div>
+      <div class="notif" id="notif">
+        <svg class="n-ico"><use href="#strideIcon"/></svg>
+        <div class="n-body">
+          <div class="n-top"><b>Stride</b> · now</div>
+          <div class="n-text" id="nText"></div>
+          <div class="n-bar"><i id="nBar"></i></div>
+        </div>
+      </div>
+      <div class="notif-off">Live widget is off — widgets refresh every 15 minutes, no notification.</div>
+    </section>
+    <section>
+      <button class="btn ghost wide" id="replay">Replay splash screen</button>
+      <p class="note">Tap a widget to open the app. Widgets update without animation, like on a real phone.</p>
+    </section>
+  </aside>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
