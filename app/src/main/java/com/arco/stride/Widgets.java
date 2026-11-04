@@ -58,7 +58,7 @@ public final class Widgets {
 
     static void update(Context c, AppWidgetManager m, int[] ids, int kind) {
         float d = Math.min(c.getResources().getDisplayMetrics().density, 3f);
-        long steps = StepEngine.display(c);
+        long steps = StepEngine.today(c);
         PendingIntent open = PendingIntent.getActivity(c, 0, new Intent(c, MainActivity.class),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         for (int id : ids) {
@@ -81,7 +81,7 @@ public final class Widgets {
         Bitmap b = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(b);
         int[] p = palette(c);
-        long s = StepEngine.display(c);
+        long s = StepEngine.today(c);
         int goal = StepStore.goal(c);
         float pc = Math.min(1f, s / (float) goal);
         String pct = (int) Math.floor(s * 100.0 / goal) + "%";

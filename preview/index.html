@@ -79,6 +79,11 @@
                   <div class="v roll" id="minV"></div><div class="u">ACTIVE MIN</div>
                 </div>
               </div>
+              <div class="card hours-card">
+                <div class="eyebrow">Today by hour</div>
+                <div class="hours" id="hours"></div>
+                <div class="hours-x"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+              </div>
               <div class="card empty">Take a walk — your first steps show up here.</div>
               <div class="card notice" id="notice"><span id="noticeText"></span><button class="btn primary small" id="noticeBtn">Allow</button></div>
             </section>
@@ -146,12 +151,11 @@
                 </div>
               </div>
               <div class="card group">
-                <div class="row">
-                  <div><div class="lbl">Live widget</div><div class="hint">Updates as you walk · small notification</div></div>
-                  <button class="switch" role="switch" data-key="live" aria-checked="true" aria-label="Live widget"></button>
+                <div class="row device-only">
+                  <div><div class="lbl">Counting with</div><div class="hint" id="sourceHint">…</div></div>
                 </div>
                 <div class="row">
-                  <div><div class="lbl">Max accuracy</div><div class="hint">Extra motion check when the phone is held steady · uses a little more battery</div></div>
+                  <div><div class="lbl">Max accuracy</div><div class="hint">Motion check while you walk, for steps the chip misses · small battery cost</div></div>
                   <button class="switch" role="switch" data-key="boost" aria-checked="true" aria-label="Max accuracy"></button>
                 </div>
                 <div class="row">
@@ -161,6 +165,10 @@
                 <div class="row">
                   <div><div class="lbl">Milestone vibrations</div><div class="hint">At 25, 50, 75 and 100%</div></div>
                   <button class="switch" role="switch" data-key="haptics" aria-checked="true" aria-label="Milestone vibrations"></button>
+                </div>
+                <div class="row device-only" id="hcRow">
+                  <div><div class="lbl">Share with Health Connect</div><div class="hint">Other fitness apps can see your steps</div></div>
+                  <button class="switch" role="switch" data-key="share" aria-checked="false" aria-label="Share with Health Connect"></button>
                 </div>
                 <div class="row device-only">
                   <div><div class="lbl">Keep counting in background</div><div class="hint" id="batteryHint">Stops the phone from pausing Stride</div></div>
@@ -178,6 +186,12 @@
                 <div class="t-result" id="testResult"></div>
                 <div class="hint device-only" id="testDebug"></div>
                 <button class="btn primary" id="testBtn">Start 100-step test</button>
+                <div class="cal device-only">
+                  <div class="eyebrow">Calibrate motion detector</div>
+                  <div class="hint">Walk exactly 100 steps, then tap Done. Once in hand, once in a pocket.</div>
+                  <div class="cal-row"><button class="btn ghost small" id="calHand">In hand</button><button class="btn ghost small" id="calPocket">In pocket</button></div>
+                  <div class="hint" id="calMsg"></div>
+                </div>
                 <div class="hint preview-only">Simulated in this preview</div>
               </div>
             </section>

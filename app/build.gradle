@@ -6,11 +6,18 @@ android {
         applicationId 'com.arco.stride'
         minSdk 29
         targetSdk 36
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '2.0'
     }
     buildTypes {
         release { minifyEnabled false; signingConfig signingConfigs.debug }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    testOptions { unitTests { includeAndroidResources = true } }
+    lint { abortOnError true; checkReleaseBuilds true }
+}
+dependencies {
+    implementation 'com.google.android.gms:play-services-fitness:21.2.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.17'
 }

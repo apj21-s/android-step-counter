@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.health.WRITE_STEPS" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
 
     <application
@@ -18,8 +18,7 @@
         android:allowBackup="true">
 
         <activity android:name=".MainActivity" android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
-            android:screenOrientation="portrait">
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -29,10 +28,26 @@
         <service android:name=".StepService" android:exported="false"
             android:foregroundServiceType="health" />
 
+        <service android:name=".StepSyncJob" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <activity android:name=".PrivacyActivity" android:exported="false" android:label="Stride privacy" />
+        <!-- Android 14+: shown from the Health Connect permission screen -->
+        <activity-alias android:name="ViewPermissionUsageActivity" android:exported="true"
+            android:targetActivity=".PrivacyActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
         <receiver android:name=".RefreshReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
         </receiver>
 

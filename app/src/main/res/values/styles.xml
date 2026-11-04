@@ -7,5 +7,4 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
     <color name="obsidian">#121212</color>
-    <color name="crimson">#DC143C</color>
 </resources>

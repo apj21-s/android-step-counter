@@ -19,17 +19,20 @@
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   const S = { goal: 8000, height: 175, steps: 0, day: today0, history: [],
-    live: true, amoled: false, haptics: true, boost: true, auto: false, hit: new Set(), range: 7, view: 'today' };
+    live: true, amoled: false, haptics: true, boost: true, share: false, hours: null, auto: false, hit: new Set(), range: 7, view: 'today' };
   // On the phone, real data comes from the app; in the laptop preview, fake history.
-  function loadDevice(st) {
-    Object.assign(S, { goal: st.goal, height: st.height, live: st.live, amoled: st.amoled, haptics: st.haptics, boost: st.boost, steps: st.steps });
-    S.day = parseDay(st.today);
-    const map = new Map(st.history), first = parseDay(st.firstDay);
-    S.history = [];
+  function loadHistory(st) {
+    const map = new Map(st.history), first = parseDay(st.firstDay), out = [];
     for (let i = 60; i >= 1; i--) {
       const d = new Date(S.day); d.setDate(d.getDate() - i);
-      if (d >= first) S.history.push({ date: d, steps: map.get(isoDay(d)) || 0 });
+      if (d >= first) out.push({ date: d, steps: map.get(isoDay(d)) || 0 });
     }
+    return out;
+  }
+  function loadDevice(st) {
+    Object.assign(S, { goal: st.goal, height: st.height, amoled: st.amoled, haptics: st.haptics, boost: st.boost, share: st.share, hours: st.hours, steps: st.steps });
+    S.day = parseDay(st.today);
+    S.history = loadHistory(st);
   }
   const DS = DEVICE ? readState() : null;
   if (DS) loadDevice(DS);
@@ -193,6 +196,7 @@
     app.classList.toggle('empty-state', s === 0);
     setRingTarget(pc);
     checkHits(silent);
+    renderHours();
     renderWidgets();
     renderNotif();
     if (S.view === 'history') renderHistory(false);
@@ -201,6 +205,26 @@
       if (document.activeElement !== sl) { sl.value = Math.min(s, sl.max); fillRange(sl); }
       $('#sliderVal').textContent = fmt(s);
     }
+  }
+
+  // ---------- Today by hour ----------
+  const HOUR_SHAPE = [0, 0, 0, 0, 0, 0, 1, 4, 8, 5, 3, 3, 6, 4, 3, 3, 4, 7, 9, 6, 3, 2, 1, 0];
+  function renderHours() {
+    const el = $('#hours'); if (!el) return;
+    let hrs = S.hours;
+    const nowH = new Date().getHours();
+    if (!hrs || !DEVICE) {          // laptop preview: spread today's steps over a typical day
+      const w = HOUR_SHAPE.map((v, i) => (i <= nowH ? v : 0)), sum = w.reduce((a, b) => a + b, 0) || 1;
+      hrs = w.map(v => Math.round(S.steps * v / sum));
+    }
+    const max = Math.max(1, ...hrs);
+    if (el.children.length !== hrs.length) el.innerHTML = '<i></i>'.repeat(hrs.length);
+    [...el.children].forEach((b, i) => {
+      b.style.height = Math.max(4, hrs[i] / max * 100) + '%';
+      b.classList.toggle('on', hrs[i] > 0);
+      b.classList.toggle('now', i === nowH);
+      b.title = `${i}:00 · ${fmt(hrs[i])} steps`;
+    });
   }
 
   // ---------- Widgets (no animation, like real widgets) ----------
@@ -374,6 +398,7 @@
     if (DEVICE && key === 'amoled') A.setAmoled(on);
     if (DEVICE && key === 'haptics') A.setHaptics(on);
     if (DEVICE && key === 'boost') A.setBoost(on);
+    if (DEVICE && key === 'share') A.setShare(on);
   }
   $$('.switch').forEach(sw => sw.addEventListener('click', () => setSwitch(sw.dataset.key, sw.getAttribute('aria-checked') !== 'true')));
 
@@ -387,8 +412,13 @@
       $('#testStatus').textContent = DEVICE ? 'Walk 100 steps, pause a moment, then tap Stop.' : 'Walking… tap Stop after your 100th step.';
       btn.textContent = 'Stop';
       if (DEVICE) {
-        const base = readState().total;
-        testT = setInterval(() => { const st = readState(); if (st) { $('#testCount').textContent = testCount = st.total - base; $('#testDebug').textContent = st.debug; } }, 300);
+        const base = readState().liveCounter;
+        testT = setInterval(() => {
+          const st = readState(); if (!st) return;
+          if (st.liveCounter < 0) { $('#testStatus').textContent = "This phone has no step counter to test."; return; }
+          $('#testCount').textContent = testCount = st.liveCounter - base;
+          $('#testDebug').textContent = st.debug;
+        }, 300);
       } else testT = setInterval(() => { if (testCount < testTarget) $('#testCount').textContent = ++testCount; }, reduce ? 5 : 55);
     } else {
       clearInterval(testT); testRun = false;
@@ -517,6 +547,10 @@
     n.classList.toggle('show', !!msg);
     $('#noticeText').textContent = msg;
     $('#noticeBtn').style.display = st.hasSensor && !st.permission ? '' : 'none';
+    const SRC = { recording: 'Google Recording API · low power, works when Stride is closed', counter: 'Phone step counter',
+      detector: 'Phone step detector', accel: 'Motion detector (this phone has no step sensor)', none: 'No step sensor found' };
+    $('#sourceHint').textContent = (SRC[st.source] || st.source) + (st.boost && st.source !== 'accel' ? ' + Max accuracy' : '');
+    $('#hcRow').style.setProperty('display', st.hcSupported ? '' : 'none', 'important');
     let ok = false; try { ok = A.batteryOk(); } catch (e) { /* older bridge */ }
     $('#batteryBtn').textContent = ok ? 'On' : 'Allow';
     $('#batteryBtn').disabled = ok;
@@ -525,26 +559,44 @@
     goalRange.value = S.goal; $('#goalVal').textContent = fmt(S.goal); fillRange(goalRange);
     $('#heightVal').textContent = S.height + ' cm';
     $('#strideHint').textContent = `Stride ${Math.round(S.height * 0.415)} cm`;
-    for (const k of ['live', 'amoled', 'haptics', 'boost']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
+    for (const k of ['amoled', 'haptics', 'boost', 'share']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
     app.classList.toggle('amoled', S.amoled); setSeg('theme', S.amoled ? 'amoled' : 'obsidian');
     setSeg('wstyle', DS.wstyle);
     $('#noticeBtn').addEventListener('click', () => A.requestPermission());
     $('#batteryBtn').addEventListener('click', () => A.batteryExempt());
     $('#guideBtn').addEventListener('click', () => A.openBatteryGuide());
     notice(DS);
-    setInterval(() => {
-      const st = readState(); if (!st) return;
+    // The app pushes a full snapshot after each sync, and step counts at most once a second.
+    window.onState = st => {
       notice(st);
       if (st.today !== isoDay(S.day)) { loadDevice(st); S.hit.clear(); render(true); if (S.view === 'history') renderHistory(true); return; }
+      S.hours = st.hours;
+      S.history = loadHistory(st);
+      for (const k of ['boost', 'share']) { S[k] = st[k]; $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(st[k]))); }
       stepTo(st.steps);
-    }, 1000);
+      renderHours();
+    };
+    // Calibration walks
+    let calPlace = null;
+    for (const [id, place, label] of [['#calHand', 'hand', 'In hand'], ['#calPocket', 'pocket', 'In pocket']]) {
+      $(id).addEventListener('click', () => {
+        if (!calPlace) {
+          calPlace = place; A.calStart(); $(id).textContent = 'Done';
+          $('#calMsg').textContent = `Walk exactly 100 steps with the phone ${place === 'hand' ? 'in your hand' : 'in a pocket'}, then tap Done.`;
+        } else if (calPlace === place) {
+          const n = A.calStop(place); calPlace = null; $(id).textContent = label;
+          $('#calMsg').textContent = n >= 50 ? `Motion detector counted ${n} of 100 · saved for ${place === 'hand' ? 'hand' : 'pocket'}.`
+            : `It counted only ${n}. Try again walking at a steady pace.`;
+        }
+      });
+    }
   }
 
   // Count up one step at a time instead of jumping in batches.
   let target = S.steps, tweenT = 0;
   function stepTo(n) {
     target = n;
-    if (n < S.steps || n - S.steps > 400) { clearTimeout(tweenT); tweenT = 0; S.steps = n; render(); return; }
+    if (document.hidden || n < S.steps || n - S.steps > 400) { clearTimeout(tweenT); tweenT = 0; S.steps = n; render(); return; }
     if (!tweenT && n > S.steps) tweenT = setTimeout(tweenTick, 0);
   }
   function tweenTick() {
