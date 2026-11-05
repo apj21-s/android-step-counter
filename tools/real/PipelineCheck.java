@@ -30,13 +30,22 @@ public class PipelineCheck {
                 }
             }
             long est = p.boutVote() == Placement.HAND ? StepFusion.handEstimate(peaks, rhythm) : peaks;
-            double[] g = by.computeIfAbsent(RealSuite.group(tr.placement), k -> new double[2]);
-            g[0] += Math.abs(est - tr.steps) / (double) tr.steps;
+            double err = (est - tr.steps) / (double) tr.steps;
+            double[] g = by.computeIfAbsent(RealSuite.group(tr.placement), k -> new double[5]);
+            g[0] += Math.abs(err);
             g[1]++;
+            g[2] += err;
+            if (Math.abs(err) > Math.abs(g[3])) g[3] = err;
+            if (err > 0) g[4]++;
+            if (p.boutVote() != Placement.HAND && RealSuite.group(tr.placement).matches("hand|typing")
+                    || p.boutVote() == Placement.HAND && !RealSuite.group(tr.placement).matches("hand|typing"))
+                System.out.println("  position missed: " + tr.name + " -> " + Placement.NAMES[p.boutVote()]);
         }
         double sum = 0, n = 0;
         for (Map.Entry<String, double[]> e : by.entrySet()) {
-            System.out.printf(Locale.ROOT, "%-7s n=%3.0f  mean |err| %.1f%%%n", e.getKey(), e.getValue()[1], 100 * e.getValue()[0] / e.getValue()[1]);
+            double[] g = e.getValue();
+            System.out.printf(Locale.ROOT, "%-7s n=%3.0f  mean |err| %.1f%%  signed bias %+.1f%%  worst walk %+.1f%%  too many in %2.0f of %2.0f%n",
+                    e.getKey(), g[1], 100 * g[0] / g[1], 100 * g[2] / g[1], 100 * g[3], g[4], g[1]);
             sum += e.getValue()[0]; n += e.getValue()[1];
         }
         System.out.printf(Locale.ROOT, "ALL     n=%3.0f  mean |err| %.1f%%%n", n, 100 * sum / n);

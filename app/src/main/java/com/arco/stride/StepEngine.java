@@ -33,7 +33,8 @@ import java.util.TreeMap;
  * with the proximity sensor (where is the phone?). StepFusion picks chip or motion by position,
  * and takes chip steps back when Activity Recognition says it was a vehicle. Motion = MotionCounter
  * peaks, plus its rhythm count for a steady hand (or StepNet, see HAND_MOTION_NET). Off 60 s after the last step.
- * Bouts where chip and motion agree teach the detector this person's step period and swing.
+ * Steady-hand bouts where chip and motion agree teach the detector how strongly this person's
+ * phone bounces (limited, slow, resettable in Settings). Step timing is never learned.
  *
  * Live: while the app is visible the step counter reports instantly, for display only.
  */
@@ -41,6 +42,14 @@ final class StepEngine {
     interface Listener { void onSteps(long today); }
 
     private static Live live;
+
+    /** Learned hand bounce (m/s², median step peak) is kept inside these limits. */
+    static final float HAND_PEAK_MIN = 0.15f, HAND_PEAK_MAX = 3f;
+
+    /** Forget what agreeing bouts taught (Settings). Calibration is reset separately. */
+    static void resetLearning(Context c) {
+        StepStore.prefs(c).edit().remove("userHandPeak").remove("userHandBouts").remove("userPeriod").apply();
+    }
 
     /**
      * Motion source: the step model (true) or the peak counter + rhythm (false). On the Cambridge
@@ -114,7 +123,6 @@ final class StepEngine {
         private final Placement place = new Placement();
         private final StepFusion fusion = new StepFusion();
         private final Sensor proximity;
-        private float periodSum;
         private int periodN;
         private final Handler main = new Handler(Looper.getMainLooper());
         private PowerManager.WakeLock wake;
@@ -141,12 +149,16 @@ final class StepEngine {
             learned(p);
         }
 
-        /** Detector settings from calibration, or else from what agreeing bouts taught us. */
+        /**
+         * Detector settings from calibration (a hand-counted walk), or else from what agreeing bouts
+         * taught us. Only the signal strength is learned, and only within fixed limits: chip and motion
+         * agreeing isn't proof they're right, so nothing that changes how steps are timed is learned.
+         */
         private void learned(SharedPreferences p) {
-            float userPeriod = p.getFloat("userPeriod", 0), handPeak = p.getFloat("userHandPeak", 0);
-            if (userPeriod > 0) pedo.maxStepS = Math.max(0.75f, Math.min(0.95f, 1.5f * userPeriod));
+            float handPeak = p.getFloat("userHandPeak", 0);
             if (p.contains("calFloor")) pedo.floor = p.getFloat("calFloor", 0.12f);
             else if (handPeak > 0) pedo.floor = Math.max(0.05f, Math.min(0.12f, 0.3f * handPeak));
+            else pedo.floor = 0.12f;
         }
 
         void start() {
@@ -269,7 +281,7 @@ final class StepEngine {
                 if (ts - lastTickNs >= 1_000_000_000L) {
                     lastTickNs = ts;
                     fusion.vote(place.current(ts), ts);
-                    if (pedo.walking) { periodSum += pedo.period; periodN++; }
+                    if (pedo.walking) periodN++;
                     tick(ts);
                 }
             } else if (type == Sensor.TYPE_PROXIMITY) {
@@ -287,7 +299,6 @@ final class StepEngine {
             if (!resuming) {
                 fusion.vehicleAt = Vehicle.available(app) ? ns -> Vehicle.at(app, ns) : null;
                 place.resetVotes();
-                periodSum = 0;
                 periodN = 0;
                 disarmTrigger();
                 lastRaw = -1;
@@ -353,16 +364,13 @@ final class StepEngine {
                 }
             }
             SharedPreferences p = StepStore.prefs(app);
-            if (fusion.agreed && periodN >= 10) {
-                // chip and motion agreed: this bout is a trustworthy sample of how this person walks
-                SharedPreferences.Editor ed = p.edit();
-                float period = periodSum / periodN, old = p.getFloat("userPeriod", 0);
-                ed.putFloat("userPeriod", old == 0 ? period : 0.8f * old + 0.2f * period);
-                if (fusion.place == Placement.HAND && pedo.medianPeak() > 0) {
-                    float hp = p.getFloat("userHandPeak", 0);
-                    ed.putFloat("userHandPeak", hp == 0 ? pedo.medianPeak() : 0.8f * hp + 0.2f * pedo.medianPeak());
-                }
-                ed.apply();
+            float mp = pedo.medianPeak();
+            if (fusion.agreed && periodN >= 10 && fusion.place == Placement.HAND && mp >= HAND_PEAK_MIN && mp <= HAND_PEAK_MAX) {
+                // steady-hand bout where chip and motion agreed: learn how strongly this person's phone bounces
+                float hp = p.getFloat("userHandPeak", 0);
+                float v = hp == 0 ? mp : 0.9f * hp + 0.1f * mp;              // slow: one odd bout moves it little
+                p.edit().putFloat("userHandPeak", Math.max(HAND_PEAK_MIN, Math.min(HAND_PEAK_MAX, v)))
+                        .putInt("userHandBouts", p.getInt("userHandBouts", 0) + 1).apply();
                 learned(p);
             }
             String today = LocalDate.now().toString();

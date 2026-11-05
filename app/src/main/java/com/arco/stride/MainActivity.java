@@ -194,6 +194,16 @@ public class MainActivity extends Activity {
         /** Stop, save to Download/Stride lab, and return {truth, chip, detector, peaks, model, file} as JSON. */
         @JavascriptInterface public String labStop(int truth) { return LabRecorder.stop(truth); }
 
+        /** Forget what Stride learned from your walks (and the calibration walks). */
+        @JavascriptInterface public void learnReset() {
+            calReset();
+            StepEngine.resetLearning(MainActivity.this);
+            runOnUiThread(() -> {                                              // restart so the defaults apply
+                StepService.stop(MainActivity.this);
+                StepService.start(MainActivity.this);
+            });
+        }
+
         @JavascriptInterface public void calReset() {
             edit().remove("calGain").remove("calFloor").remove("gain_hand").remove("gain_pocket")
                     .remove("floor_hand").remove("floor_pocket").apply();

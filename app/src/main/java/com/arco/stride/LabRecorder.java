@@ -22,7 +22,8 @@ import java.util.Locale;
 /**
  * Lab mode (hidden): record raw sensors during a walk you count by hand, for tuning on real walks.
  * Saves Download/Stride lab/<time>_<place>.csv: "# truth=N place=P" then rows "t_ns,type,v0,v1,v2"
- * (A accel 50 Hz, G gyro 50 Hz, C step counter, D step detector, P proximity, L light).
+ * (A accel 50 Hz, G gyro 50 Hz, C step counter, D step detector, P proximity, L light,
+ * V Activity Recognition vehicle transition: v0 = 1 entered / 0 left, from the 2 h before the end).
  * tools/real/lab2csv.py turns these into the format tools/real/run.sh scores.
  */
 final class LabRecorder implements SensorEventListener {
@@ -84,13 +85,21 @@ final class LabRecorder implements SensorEventListener {
 
     private String end(int truth) {
         sm.unregisterListener(this);
+        // vehicle transitions near the recording (they arrive late, so take them at the end)
+        long now = android.os.SystemClock.elapsedRealtimeNanos();
+        for (String ev : StepStore.prefs(app).getString("arEvents", "").split(",")) {
+            int k = ev.indexOf(':');
+            if (k < 0) continue;
+            long t = Long.parseLong(ev.substring(k + 1));
+            if (now - t < 2 * 3_600_000_000_000L) synchronized (rows) { rows.append(t).append(",V,").append(ev.charAt(0)).append(",0,0\n"); }
+        }
         thread.quitSafely();
         if (wake.isHeld()) wake.release();
         JSONObject o = new JSONObject();
         try {
             long chip;
             synchronized (rows) { chip = counterFirst < 0 ? 0 : counterLast - counterFirst; }
-            o.put("truth", truth).put("place", place).put("chip", chip).put("detector", detector)
+            o.put("truth", truth).put("place", place).put("vehicleOn", Vehicle.available(app)).put("chip", chip).put("detector", detector)
                     .put("peaks", peakSteps).put("model", netSteps).put("modelWalking", walkingNetSteps);
             String name = String.format(Locale.ROOT, "%1$tY%1$tm%1$td_%1$tH%1$tM%1$tS_%2$s.csv", startMs, place);
             o.put("file", save(name, String.format(Locale.ROOT, "# truth=%d place=%s chip=%d detector=%d peaks=%d model=%d%n",

@@ -576,7 +576,11 @@
       stepTo(st.steps);
       renderHours();
     };
-    // Lab mode: hold "Accuracy check" for a second to show it
+    $('#learnReset').addEventListener('click', () => {
+      if (!confirm('Forget calibration and what Stride learned from your walks?')) return;
+      A.learnReset(); $('#calMsg').textContent = 'Back to the default settings.';
+    });
+        // Lab mode: hold "Accuracy check" for a second to show it
     let labHold = 0;
     $('#testTitle').addEventListener('pointerdown', () => { labHold = setTimeout(() => { $('#lab').hidden = false; A.vibrate(30); }, 900); });
     for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('#testTitle').addEventListener(ev, () => clearTimeout(labHold));

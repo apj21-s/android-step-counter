@@ -101,9 +101,33 @@ public class StepFusionTest {
         StepFusion f = bout(Placement.UNKNOWN, true, true, 1, 1);
         assertTrue(f.vehicle);
         assertFalse(f.usedMotion);
+        // the whole 100 s bout is inside the ride (the predicate says vehicle at all times)
         assertEquals(100, f.chipBySecond.values().stream().mapToLong(Long::longValue).sum());
-        f = bout(Placement.UNKNOWN, true, false, 1, 1);      // vehicle votes ignored without Activity Recognition
+        f = bout(Placement.UNKNOWN, true, false, 1, 1);      // no Activity Recognition: nothing taken back
         assertFalse(f.vehicle);
+    }
+
+    @Test public void stepsJustAfterGettingOffAreKept() {
+        // bus from 1000 s to 1120 s (Activity Recognition), then a 60 s walk in the same bout
+        long busEnd = 1120 * S;
+        StepFusion f = new StepFusion();
+        f.vehicleAt = ns -> ns >= 1000 * S && ns < busEnd;
+        long t = 1000 * S;
+        f.start(t);
+        for (int i = 0; i < 180; i++) {
+            t += S;
+            f.chip(2, t);                                  // fake on the bus, real afterwards
+            f.vote(Placement.UPRIGHT, t);
+            f.tick(t);
+        }
+        while (f.active()) { t += S; f.tick(t); }
+        assertTrue(f.vehicle);
+        // only seconds with 30 s of bus on both sides: 1030..1089 -> 60 s x 2 steps
+        assertEquals(120, f.chipBySecond.values().stream().mapToLong(Long::longValue).sum());
+        assertEquals(1030L, (long) f.chipBySecond.firstKey());
+        assertEquals(1089L, (long) f.chipBySecond.lastKey());
+        // the walk after the bus is judged normally (chip kept, not removed)
+        assertEquals(240, f.chipSteps);
     }
 
     @Test public void unknownPositionKeepsOldMaxRule() {

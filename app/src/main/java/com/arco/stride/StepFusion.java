@@ -10,7 +10,8 @@ import java.util.TreeMap;
  * A bout starts at the first step. It stops 60 s after the last step (or after 120 s with no
  * chip steps at all, e.g. in a car), then waits 15 s more so late chip reports still land in it.
  * When it closes, by where the phone was for most of the bout (Placement):
- *   in a vehicle (Activity Recognition, most of the bout)  -> 0: the chip's steps are taken back
+ *   seconds in a vehicle (Activity Recognition, with 30 s of vehicle on both sides) -> the chip's
+ *     steps in those seconds are taken back; the rest of the bout is judged as below
  *   pocket / bag / upright / swinging hand                -> chip (it catches nearly every step there)
  *   steady hand (screen up)                               -> motion, if higher than the chip
  *   unknown                                               -> max(chip, motion)  (the old rule)
@@ -25,6 +26,8 @@ final class StepFusion {
     static final long NO_CHIP_NS = 120_000_000_000L;
 
     static final int IDLE = 0, WALKING = 1, STOPPED = 2, CLOSED = 3;
+    /** A second counts as vehicle only with vehicle this long before and after it (late reports, walking off a bus). */
+    static final long VEHICLE_MARGIN_NS = 30_000_000_000L;
 
     private final TreeMap<Long, long[]> secs = new TreeMap<>();   // second -> {motion peaks, chip, rhythm}
     private boolean active, stopped;
@@ -130,7 +133,21 @@ final class StepFusion {
         return CLOSED;
     }
 
+    private boolean vehicleSecond(long sec) {
+        long ns = sec * 1_000_000_000L;
+        return vehicleAt.test(ns) && vehicleAt.test(ns - VEHICLE_MARGIN_NS) && vehicleAt.test(ns + VEHICLE_MARGIN_NS);
+    }
+
     private void close() {
+        // vehicle seconds first: their chip steps are taken back and they're left out of everything else
+        chipBySecond.clear();
+        if (vehicleAt != null) {
+            for (Map.Entry<Long, long[]> e : secs.entrySet()) {
+                if (e.getValue()[1] > 0 && vehicleSecond(e.getKey())) chipBySecond.put(e.getKey(), e.getValue()[1]);
+            }
+            for (Long sec : chipBySecond.keySet()) secs.remove(sec);
+        }
+        vehicle = !chipBySecond.isEmpty();
         long motionRaw = 0, chip = 0, rhythmRaw = 0, first = -1, last = -1;
         for (Map.Entry<Long, long[]> e : secs.entrySet()) {
             motionRaw += e.getValue()[0];
@@ -152,20 +169,8 @@ final class StepFusion {
         chipSteps = chip;
         motionSteps = motion;
         boolean arKnown = vehicleAt != null;
-        int stepSecs = 0, vehicleSecs = 0;
-        if (arKnown) {
-            // judged at close time: Activity Recognition reports transitions late, but with the time they happened
-            for (Map.Entry<Long, long[]> e : secs.entrySet()) {
-                if (e.getValue()[0] + e.getValue()[1] == 0) continue;
-                stepSecs++;
-                if (vehicleAt.test(e.getKey() * 1_000_000_000L)) vehicleSecs++;
-            }
-        }
-        vehicle = arKnown && stepSecs > 0 && vehicleSecs * 2 >= stepSecs;
         agreed = chip > 20 && Math.abs(motion - chip) <= 0.05 * chip;
-        if (vehicle) {
-            usedMotion = false;
-        } else if (place == Placement.HAND) {
+        if (place == Placement.HAND) {
             usedMotion = motion > chip && !doubled && (arKnown || chipSees);
         } else if (place == Placement.UNKNOWN) {
             usedMotion = motion > chip && chipSees && !doubled;
@@ -173,8 +178,6 @@ final class StepFusion {
             usedMotion = false;                     // covered, upright, swinging: the chip is better there
         }
 
-        chipBySecond.clear();
-        if (vehicle) for (Map.Entry<Long, long[]> e : secs.entrySet()) if (e.getValue()[1] > 0) chipBySecond.put(e.getKey(), e.getValue()[1]);
 
         motionBySecond.clear();
         if (usedMotion) {
