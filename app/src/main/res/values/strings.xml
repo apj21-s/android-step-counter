@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="steps_today">Steps today</string>
+    <string name="privacy_text">Stride counts your steps on this phone and keeps them only on this phone.\n\nIf you turn on \"Share with Health Connect\", Stride writes your step counts (number of steps per 15 minutes) to Health Connect so other fitness apps you allow can see them. Stride never reads data from Health Connect.\n\nStride has no account, no servers and no ads, and sends nothing over the internet.\n\nYou can turn sharing off at any time in Stride\'s Settings, and remove Stride\'s data in Health Connect.</string>
+</resources>
