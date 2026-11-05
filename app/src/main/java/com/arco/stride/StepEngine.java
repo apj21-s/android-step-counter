@@ -46,6 +46,29 @@ final class StepEngine {
     /** Learned hand bounce (m/s², median step peak) is kept inside these limits. */
     static final float HAND_PEAK_MIN = 0.15f, HAND_PEAK_MAX = 3f;
 
+    /**
+     * Store a closed bout: motion steps (when motion won) go in as the "boost" source, and the chip's
+     * vehicle steps go into bucket_minus, each in the 15-minute bucket where it happened.
+     * Returns {boost steps added, vehicle steps removed}.
+     */
+    static long[] applyBout(StepRepository repo, StepFusion fusion, java.util.function.LongUnaryOperator nsToWallMs, ZoneId zone, long now) {
+        long added = 0, removed = 0;
+        if (fusion.usedMotion) {
+            TreeMap<Long, Long> perBucket = new TreeMap<>();
+            for (Map.Entry<Long, Long> e : fusion.motionBySecond.entrySet())
+                perBucket.merge(StepRepository.bucketStart(nsToWallMs.applyAsLong(e.getKey() * 1_000_000_000L)), e.getValue(), Long::sum);
+            for (Map.Entry<Long, Long> e : perBucket.entrySet()) {
+                repo.addSteps("boost", e.getKey(), e.getValue(), zone, now);
+                added += e.getValue();
+            }
+        }
+        for (Map.Entry<Long, Long> e : fusion.chipBySecond.entrySet()) {
+            repo.addMinus(nsToWallMs.applyAsLong(e.getKey() * 1_000_000_000L), e.getValue(), zone, now);
+            removed += e.getValue();
+        }
+        return new long[]{added, removed};
+    }
+
     /** Forget what agreeing bouts taught (Settings). Calibration is reset separately. */
     static void resetLearning(Context c) {
         StepStore.prefs(c).edit().remove("userHandPeak").remove("userHandBouts").remove("userPeriod").apply();
@@ -337,32 +360,8 @@ final class StepEngine {
         private void closeBout() {
             stopAccel();
             main.removeCallbacks(graceCheck);
-            long added = 0;
-            if (fusion.usedMotion) {
-                // place the extra steps in the 15-minute buckets where they happened
-                TreeMap<Long, Long> perBucket = new TreeMap<>();
-                for (Map.Entry<Long, Long> e : fusion.motionBySecond.entrySet()) {
-                    long wall = StepRepository.bucketStart(wallMs(e.getKey() * 1_000_000_000L));
-                    Long sum = perBucket.get(wall);
-                    perBucket.put(wall, (sum == null ? 0 : sum) + e.getValue());
-                }
-                ZoneId zone = ZoneId.systemDefault();
-                long now = System.currentTimeMillis();
-                for (Map.Entry<Long, Long> e : perBucket.entrySet()) {
-                    repo.addSteps("boost", e.getKey(), e.getValue(), zone, now);
-                    added += e.getValue();
-                }
-            }
-            long removed = 0;
-            if (fusion.vehicle) {
-                // fake chip steps in a vehicle: take them off the buckets they were counted in
-                ZoneId zone = ZoneId.systemDefault();
-                long now = System.currentTimeMillis();
-                for (Map.Entry<Long, Long> e : fusion.chipBySecond.entrySet()) {
-                    repo.addMinus(wallMs(e.getKey() * 1_000_000_000L), e.getValue(), zone, now);
-                    removed += e.getValue();
-                }
-            }
+            long[] r = applyBout(repo, fusion, ns -> wallMs(ns), ZoneId.systemDefault(), System.currentTimeMillis());
+            long added = r[0], removed = r[1];
             SharedPreferences p = StepStore.prefs(app);
             float mp = pedo.medianPeak();
             if (fusion.agreed && periodN >= 10 && fusion.place == Placement.HAND && mp >= HAND_PEAK_MIN && mp <= HAND_PEAK_MAX) {

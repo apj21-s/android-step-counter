@@ -141,13 +141,18 @@ final class StepFusion {
     private void close() {
         // vehicle seconds first: their chip steps are taken back and they're left out of everything else
         chipBySecond.clear();
+        vehicle = false;
         if (vehicleAt != null) {
-            for (Map.Entry<Long, long[]> e : secs.entrySet()) {
-                if (e.getValue()[1] > 0 && vehicleSecond(e.getKey())) chipBySecond.put(e.getKey(), e.getValue()[1]);
+            // every vehicle second leaves the bout: chip steps there are taken back, motion steps there never count
+            java.util.Iterator<Map.Entry<Long, long[]>> it = secs.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<Long, long[]> e = it.next();
+                if (!vehicleSecond(e.getKey())) continue;
+                if (e.getValue()[1] > 0) chipBySecond.put(e.getKey(), e.getValue()[1]);
+                it.remove();
+                vehicle = true;
             }
-            for (Long sec : chipBySecond.keySet()) secs.remove(sec);
         }
-        vehicle = !chipBySecond.isEmpty();
         long motionRaw = 0, chip = 0, rhythmRaw = 0, first = -1, last = -1;
         for (Map.Entry<Long, long[]> e : secs.entrySet()) {
             motionRaw += e.getValue()[0];

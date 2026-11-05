@@ -16,6 +16,10 @@ import java.util.TreeMap;
  *   model      - StepNet while walking (Lab-mode only, not used for counting)
  *   app        - what Stride stores: StepFusion's choice, less vehicle steps
  *   app/chipH  - the same but with chip-only in a steady hand (the alternative to "motion if higher")
+ *   stored     - what the database ends up with: the chip's steps as the Recording API would bucket them,
+ *                StepEngine.applyBout's boost and vehicle rows, combined per 15-min bucket by Buckets.value
+ *                (the same rule StepRepository uses). Needs wall0/ns0 in the header (newer files);
+ *                older files are bucketed from the first sample.
  * Usage: LabReplay <lab .csv files...>
  */
 public class LabReplay {
@@ -30,22 +34,26 @@ public class LabReplay {
             List<long[]> vehicle = new ArrayList<>();          // {ns, entered}
             for (String l : lines) { String[] r = l.split(","); if (r.length > 2 && r[1].equals("V")) vehicle.add(new long[]{Long.parseLong(r[0]), (long) Float.parseFloat(r[2])}); }
             vehicle.sort((x, y) -> Long.compare(x[0], y[0]));
-            double[] app = replay(lines, vehicle, false), alt = replay(lines, vehicle, true);
+            long wall0 = Long.parseLong(head.getOrDefault("wall0", "0")), ns0 = Long.parseLong(head.getOrDefault("ns0", "-1"));
+            double[] app = replay(lines, vehicle, false, wall0, ns0), alt = replay(lines, vehicle, true, wall0, ns0);
             String name = Path.of(f).getFileName().toString();
             System.out.printf(Locale.ROOT, "%-40s %5d %6.0f %7.0f %6.0f %6.0f  %-8s %6.0f | %6.0f (%s) | %6.0f (%s)%n", name.length() > 40 ? name.substring(0, 40) : name,
                     truth, app[1], app[2], app[3], app[4], Placement.NAMES[(int) app[5]], app[6], app[0], err(app[0], truth), alt[0], err(alt[0], truth));
-            if (truth > 0) { sumApp[0] += (app[0] - truth) / truth; sumAlt[0] += (alt[0] - truth) / truth; sumApp[1]++; }
+            System.out.printf(Locale.ROOT, "%-40s stored total %.0f (%s) in %.0f bucket(s)%s%n", "", app[7], err(app[7], truth), app[8],
+                    head.containsKey("wall0") ? "" : " (no wall0 in header: buckets from the first sample)");
+            if (truth > 0) { sumApp[0] += (app[7] - truth) / truth; sumAlt[0] += (alt[7] - truth) / truth; sumApp[1]++; }
         }
         if (sumApp[1] > 0)
-            System.out.printf(Locale.ROOT, "mean signed error over walks: app %+.1f%%, chip-only in hand %+.1f%%%n", 100 * sumApp[0] / sumApp[1], 100 * sumAlt[0] / sumApp[1]);
+            System.out.printf(Locale.ROOT, "mean signed error of the stored total over walks: app %+.1f%%, chip-only in hand %+.1f%%%n", 100 * sumApp[0] / sumApp[1], 100 * sumAlt[0] / sumApp[1]);
     }
 
     static String err(double got, int truth) {
         return truth == 0 ? String.format(Locale.ROOT, "%+.0f fake", got) : String.format(Locale.ROOT, "%+5.1f%%", 100 * (got - truth) / truth);
     }
 
-    /** Returns {app total, chip, peaks, hand estimate, model, placement, vehicle steps removed}. */
-    static double[] replay(List<String> lines, List<long[]> vehicle, boolean chipOnlyInHand) {
+    /** Returns {bout total, chip, peaks, hand estimate, model, placement, vehicle steps removed, stored total, buckets}. */
+    static double[] replay(List<String> lines, List<long[]> vehicle, boolean chipOnlyInHand, long wall0, long ns0) {
+        TreeMap<Long, Long> chipByNs = new TreeMap<>();
         MotionCounter mc = new MotionCounter();
         Placement place = new Placement();
         StepNet net = StepNet.standard();
@@ -82,7 +90,7 @@ public class LabReplay {
                 }
                 case "C": {
                     long raw = (long) Float.parseFloat(r[2]);
-                    if (lastCounter >= 0 && raw > lastCounter) fusion.chip(raw - lastCounter, t);
+                    if (lastCounter >= 0 && raw > lastCounter) { fusion.chip(raw - lastCounter, t); chipByNs.merge(t, raw - lastCounter, Long::sum); }
                     lastCounter = raw;
                     break;
                 }
@@ -97,6 +105,22 @@ public class LabReplay {
         boolean motion = fusion.usedMotion && !(chipOnlyInHand && fusion.place == Placement.HAND);
         double appTotal = (motion ? Math.max(fusion.motionSteps, fusion.chipSteps) : fusion.chipSteps);
         long chipAll = fusion.chipSteps + removed;
-        return new double[]{appTotal, chipAll, peaks, StepFusion.handEstimate(peaks, rhythm), model, fusion.place, removed};
+
+        // what the database ends up with, bucket by bucket (same pieces and rule as the app)
+        final long base = ns0 >= 0 ? ns0 : first, wallBase = wall0;
+        java.util.function.LongUnaryOperator toWall = ns -> wallBase + (ns - base) / 1_000_000L;
+        TreeMap<Long, Map<String, Long>> buckets = new TreeMap<>();
+        TreeMap<Long, Long> minus = new TreeMap<>();
+        for (Map.Entry<Long, Long> e : chipByNs.entrySet())
+            buckets.computeIfAbsent(bucket(toWall.applyAsLong(e.getKey())), k -> new TreeMap<>()).merge("recording", e.getValue(), Long::sum);
+        if (motion) for (Map.Entry<Long, Long> e : fusion.motionBySecond.entrySet())
+            buckets.computeIfAbsent(bucket(toWall.applyAsLong(e.getKey() * 1_000_000_000L)), k -> new TreeMap<>()).merge("boost", e.getValue(), Long::sum);
+        for (Map.Entry<Long, Long> e : fusion.chipBySecond.entrySet())
+            minus.merge(bucket(toWall.applyAsLong(e.getKey() * 1_000_000_000L)), e.getValue(), Long::sum);
+        long stored = 0;
+        for (Map.Entry<Long, Map<String, Long>> b : buckets.entrySet()) stored += Buckets.value(b.getValue(), minus.getOrDefault(b.getKey(), 0L));
+        return new double[]{appTotal, chipAll, peaks, StepFusion.handEstimate(peaks, rhythm), model, fusion.place, removed, stored, buckets.size()};
     }
+
+    static long bucket(long wallMs) { return wallMs - Math.floorMod(wallMs, 15 * 60_000L); }
 }

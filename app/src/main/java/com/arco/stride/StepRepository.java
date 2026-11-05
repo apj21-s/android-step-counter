@@ -27,7 +27,8 @@ import java.util.Set;
  *
  * step_buckets: steps per 15-minute bucket per source. Every time zone is a whole number of
  *   15 minutes from UTC, so these buckets always line up with local hours and midnight, also
- *   across DST and travel. A bucket's value is the LARGEST of its sources, never their sum.
+ *   across DST and travel. A bucket's value is the LARGEST of its sources, never their sum
+ *   (exact rule, with vehicle steps: Buckets.value).
  *   Sources: recording (Google Recording API), counter / detector / accel (phone sensors,
  *   when Play services is missing), boost (extra steps from Max accuracy bouts).
  * daily_steps: the day totals worked out from step_buckets (plus migrated history).
@@ -35,7 +36,7 @@ import java.util.Set;
  * counter_state: last raw step-counter value, to turn a since-boot total into deltas.
  * hc_written: what we already sent to Health Connect.
  * bucket_minus: chip steps counted while in a vehicle (Activity Recognition), taken off the
- *   bucket's value (never below zero).
+ *   bucket's chip sources before the largest is picked (never below zero).
  */
 public final class StepRepository extends SQLiteOpenHelper {
     static final long BUCKET_MS = 15 * 60_000L;
@@ -192,21 +193,18 @@ public final class StepRepository extends SQLiteOpenHelper {
         Cursor mc = db.rawQuery("SELECT start_ms, steps FROM bucket_minus WHERE date = ?", new String[]{date});
         while (mc.moveToNext()) minus.put(mc.getLong(0), mc.getLong(1));
         mc.close();
-        Cursor c = db.rawQuery("SELECT start_ms, source, steps FROM step_buckets WHERE date = ? ORDER BY start_ms, steps DESC, source", new String[]{date});
-        long total = 0, lastStart = Long.MIN_VALUE;
+        long total = 0;
         Map<String, Long> bySource = new HashMap<>();
-        while (c.moveToNext()) {
-            long start = c.getLong(0);
-            if (start == lastStart) continue;           // a smaller source in the same bucket
-            lastStart = start;
-            String source = c.getString(1);
-            Long m = minus.get(start);
-            long steps = Math.max(0, c.getLong(2) - (m == null ? 0 : m));
+        for (Map.Entry<Long, Map<String, Long>> b : sources(db, "date = ?", new String[]{date}).entrySet()) {
+            Long m = minus.get(b.getKey());
+            long mm = m == null ? 0 : m;
+            long steps = Buckets.value(b.getValue(), mm);
+            String source = Buckets.winner(b.getValue(), mm);
+            if (source == null) continue;
             total += steps;
             Long sum = bySource.get(source);
             bySource.put(source, (sum == null ? 0 : sum) + steps);
         }
-        c.close();
         String source = "none";
         long best = -1;
         for (Map.Entry<String, Long> e : bySource.entrySet()) {
@@ -224,6 +222,30 @@ public final class StepRepository extends SQLiteOpenHelper {
         v.put("source", source);
         v.put("updated_at", now);
         db.insertWithOnConflict("daily_steps", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    /** bucket start -> {source -> steps} for the rows matching `where`. */
+    private static java.util.TreeMap<Long, Map<String, Long>> sources(SQLiteDatabase db, String where, String[] args) {
+        java.util.TreeMap<Long, Map<String, Long>> out = new java.util.TreeMap<>();
+        Cursor c = db.rawQuery("SELECT start_ms, source, steps FROM step_buckets WHERE " + where, args);
+        while (c.moveToNext()) out.computeIfAbsent(c.getLong(0), k -> new HashMap<>()).put(c.getString(1), c.getLong(2));
+        c.close();
+        return out;
+    }
+
+    /** bucket start -> value (Buckets.value) for buckets starting in [fromMs, toMs). */
+    private static java.util.TreeMap<Long, Long> values(SQLiteDatabase db, long fromMs, long toMs) {
+        String[] args = {String.valueOf(fromMs), String.valueOf(toMs)};
+        Map<Long, Long> minus = new HashMap<>();
+        Cursor mc = db.rawQuery("SELECT start_ms, steps FROM bucket_minus WHERE start_ms >= ? AND start_ms < ?", args);
+        while (mc.moveToNext()) minus.put(mc.getLong(0), mc.getLong(1));
+        mc.close();
+        java.util.TreeMap<Long, Long> out = new java.util.TreeMap<>();
+        for (Map.Entry<Long, Map<String, Long>> b : sources(db, "start_ms >= ? AND start_ms < ?", args).entrySet()) {
+            Long m = minus.get(b.getKey());
+            out.put(b.getKey(), Buckets.value(b.getValue(), m == null ? 0 : m));
+        }
+        return out;
     }
 
     /** Copy history from the old SharedPreferences format, once. */
@@ -290,15 +312,10 @@ public final class StepRepository extends SQLiteOpenHelper {
         long start = midnight(day, zone), end = midnight(day.plusDays(1), zone);
         int n = (int) ((end - start) / 3_600_000L);
         long[] out = new long[n];
-        Cursor c = getReadableDatabase().rawQuery(
-                "SELECT b.start_ms, MAX(MAX(b.steps) - IFNULL(m.steps, 0), 0) FROM step_buckets b LEFT JOIN bucket_minus m ON m.start_ms = b.start_ms"
-                        + " WHERE b.start_ms >= ? AND b.start_ms < ? GROUP BY b.start_ms",
-                new String[]{String.valueOf(start), String.valueOf(end)});
-        while (c.moveToNext()) {
-            int h = (int) ((c.getLong(0) - start) / 3_600_000L);
-            if (h >= 0 && h < n) out[h] += c.getLong(1);
+        for (Map.Entry<Long, Long> e : values(getReadableDatabase(), start, end).entrySet()) {
+            int h = (int) ((e.getKey() - start) / 3_600_000L);
+            if (h >= 0 && h < n) out[h] += e.getValue();
         }
-        c.close();
         return out;
     }
 
@@ -311,18 +328,18 @@ public final class StepRepository extends SQLiteOpenHelper {
         return out;
     }
 
-    /** Buckets whose value (largest source, less vehicle steps) changed since we last sent it to Health Connect: {start, steps}. */
+    /** Buckets whose value (Buckets.value) changed since we last sent it to Health Connect: {start, steps}. */
     synchronized List<long[]> changedForHealth(long fromMs) {
         List<long[]> out = new ArrayList<>();
-        Cursor c = getReadableDatabase().rawQuery(
-                "SELECT b.start_ms, MAX(MAX(b.steps) - IFNULL(m.steps, 0), 0), h.steps FROM step_buckets b"
-                        + " LEFT JOIN hc_written h ON h.start_ms = b.start_ms LEFT JOIN bucket_minus m ON m.start_ms = b.start_ms"
-                        + " WHERE b.start_ms >= ? GROUP BY b.start_ms", new String[]{String.valueOf(fromMs)});
-        while (c.moveToNext()) {
-            long steps = c.getLong(1);
-            if (c.isNull(2) || c.getLong(2) != steps) out.add(new long[]{c.getLong(0), steps});
-        }
+        SQLiteDatabase db = getReadableDatabase();
+        Map<Long, Long> written = new HashMap<>();
+        Cursor c = db.rawQuery("SELECT start_ms, steps FROM hc_written WHERE start_ms >= ?", new String[]{String.valueOf(fromMs)});
+        while (c.moveToNext()) written.put(c.getLong(0), c.getLong(1));
         c.close();
+        for (Map.Entry<Long, Long> e : values(db, fromMs, Long.MAX_VALUE).entrySet()) {
+            Long w = written.get(e.getKey());
+            if (w == null || w.longValue() != e.getValue()) out.add(new long[]{e.getKey(), e.getValue()});
+        }
         return out;
     }
 

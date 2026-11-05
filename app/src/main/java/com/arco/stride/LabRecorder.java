@@ -21,7 +21,7 @@ import java.util.Locale;
 
 /**
  * Lab mode (hidden): record raw sensors during a walk you count by hand, for tuning on real walks.
- * Saves Download/Stride lab/<time>_<place>.csv: "# truth=N place=P" then rows "t_ns,type,v0,v1,v2"
+ * Saves Download/Stride lab/<time>_<place>.csv: "# truth=N place=P ... wall0=ms ns0=ns" then rows "t_ns,type,v0,v1,v2"
  * (A accel 50 Hz, G gyro 50 Hz, C step counter, D step detector, P proximity, L light,
  * V Activity Recognition vehicle transition: v0 = 1 entered / 0 left, from the 2 h before the end).
  * tools/real/lab2csv.py turns these into the format tools/real/run.sh scores.
@@ -36,6 +36,7 @@ final class LabRecorder implements SensorEventListener {
     private final HandlerThread thread = new HandlerThread("stride-lab");
     private final PowerManager.WakeLock wake;
     private final long startMs = System.currentTimeMillis();
+    private final long startNs = android.os.SystemClock.elapsedRealtimeNanos();   // same clock as sensor timestamps
     private long counterFirst = -1, counterLast = -1, detector;
     // live replay at 25 Hz (every second accel sample), the way the app runs
     private final MotionCounter peaks = new MotionCounter();
@@ -102,8 +103,8 @@ final class LabRecorder implements SensorEventListener {
             o.put("truth", truth).put("place", place).put("vehicleOn", Vehicle.available(app)).put("chip", chip).put("detector", detector)
                     .put("peaks", peakSteps).put("model", netSteps).put("modelWalking", walkingNetSteps);
             String name = String.format(Locale.ROOT, "%1$tY%1$tm%1$td_%1$tH%1$tM%1$tS_%2$s.csv", startMs, place);
-            o.put("file", save(name, String.format(Locale.ROOT, "# truth=%d place=%s chip=%d detector=%d peaks=%d model=%d%n",
-                    truth, place, chip, detector, peakSteps, netSteps)));
+            o.put("file", save(name, String.format(Locale.ROOT, "# truth=%d place=%s chip=%d detector=%d peaks=%d model=%d wall0=%d ns0=%d%n",
+                    truth, place, chip, detector, peakSteps, netSteps, startMs, startNs)));
         } catch (JSONException | RuntimeException e) {
             try { o.put("error", String.valueOf(e.getMessage())); } catch (JSONException ignored) { /* can't happen */ }
         }
