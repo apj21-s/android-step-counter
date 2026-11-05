@@ -188,6 +188,12 @@ public class MainActivity extends Activity {
             return steps;
         }
 
+        /** Lab mode: record raw sensors for a hand-counted walk. place: hand, typing, pocket_front, pocket_back, bag, swing. */
+        @JavascriptInterface public void labStart(String place) { LabRecorder.start(MainActivity.this, place); }
+
+        /** Stop, save to Download/Stride lab, and return {truth, chip, detector, peaks, model, file} as JSON. */
+        @JavascriptInterface public String labStop(int truth) { return LabRecorder.stop(truth); }
+
         @JavascriptInterface public void calReset() {
             edit().remove("calGain").remove("calFloor").remove("gain_hand").remove("gain_pocket")
                     .remove("floor_hand").remove("floor_pocket").apply();

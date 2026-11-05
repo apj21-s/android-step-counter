@@ -43,6 +43,21 @@ public class StepRepositoryTest {
         assertEquals(1960, repo.day("2026-11-05"));
     }
 
+    @Test public void vehicleStepsAreTakenOffNeverBelowZero() {
+        long from = at("2026-11-05T00:00", KOLKATA), to = at("2026-11-06T00:00", KOLKATA);
+        long bus = at("2026-11-05T09:00", KOLKATA);
+        repo.replaceRange("recording", from, to, new long[]{bus, at("2026-11-05T10:00", KOLKATA)}, new long[]{300, 500}, KOLKATA, 1);
+        repo.addMinus(bus + 60_000, 120, KOLKATA, 2);           // 120 fake chip steps on the bus
+        assertEquals(680, repo.day("2026-11-05"));
+        assertEquals(180, repo.hours(LocalDate.parse("2026-11-05"), KOLKATA)[9]);
+        repo.addMinus(bus + 120_000, 1000, KOLKATA, 3);         // more than the bucket holds: bucket is 0, not negative
+        assertEquals(500, repo.day("2026-11-05"));
+        // a later sync of the same bucket keeps the subtraction
+        repo.replaceRange("recording", from, to, new long[]{bus, at("2026-11-05T10:00", KOLKATA)}, new long[]{310, 500}, KOLKATA, 4);
+        assertEquals(500, repo.day("2026-11-05"));
+        assertEquals(0, repo.changedForHealth(from).stream().filter(b -> b[0] == bus).findFirst().get()[1]);
+    }
+
     @Test public void counterResetAfterReboot() {
         assertEquals(0, repo.counterDelta(5000, 7));      // first reading: nothing to add yet
         assertEquals(120, repo.counterDelta(5120, 7));

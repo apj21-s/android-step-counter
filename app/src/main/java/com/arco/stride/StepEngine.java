@@ -30,7 +30,10 @@ import java.util.TreeMap;
  *
  * Max accuracy (Settings, on by default): the accelerometer stays off until a step wakes us
  * (wake-up step detector, or significant motion). It then runs at 25 Hz for the walking bout,
- * and the bout counts max(chip, motion) via StepFusion. It turns off 60 s after the last step.
+ * with the proximity sensor (where is the phone?). StepFusion picks chip or motion by position,
+ * and takes chip steps back when Activity Recognition says it was a vehicle. Motion = MotionCounter
+ * peaks, plus its rhythm count for a steady hand (or StepNet, see HAND_MOTION_NET). Off 60 s after the last step.
+ * Bouts where chip and motion agree teach the detector this person's step period and swing.
  *
  * Live: while the app is visible the step counter reports instantly, for display only.
  */
@@ -38,6 +41,13 @@ final class StepEngine {
     interface Listener { void onSteps(long today); }
 
     private static Live live;
+
+    /**
+     * Motion source: the step model (true) or the peak counter + rhythm (false). On the Cambridge
+     * walks (people the model never saw) the model was less accurate than the peak counter, so it
+     * stays off here; Lab mode still shows its count next to the others. See tools/real/README.md.
+     */
+    static final boolean HAND_MOTION_NET = false;
 
     private StepEngine() {}
 
@@ -99,8 +109,13 @@ final class StepEngine {
         private final Sensor counter, detector, wakeDetector, sigMotion, accel, wakeAccel;
         private final String source;
         private final boolean boost;
-        private final AccelPedometer pedo = new AccelPedometer();
+        private final MotionCounter pedo = new MotionCounter();
+        private final StepNet net = StepNet.standard();
+        private final Placement place = new Placement();
         private final StepFusion fusion = new StepFusion();
+        private final Sensor proximity;
+        private float periodSum;
+        private int periodN;
         private final Handler main = new Handler(Looper.getMainLooper());
         private PowerManager.WakeLock wake;
         private boolean accelOn, detectorForChip;
@@ -118,18 +133,30 @@ final class StepEngine {
             accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             Sensor wa = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER, true);
             wakeAccel = wa != null && wa.isWakeUpSensor() ? wa : null;
+            proximity = sm.getDefaultSensor(Sensor.TYPE_PROXIMITY);
             source = source(app);
             boost = StepStore.boost(app) && !source.equals("accel") && accel != null;
             SharedPreferences p = StepStore.prefs(app);
             fusion.gain = p.getFloat("calGain", 1f);
-            pedo.floor = p.getFloat("calFloor", 0.12f);
+            learned(p);
+        }
+
+        /** Detector settings from calibration, or else from what agreeing bouts taught us. */
+        private void learned(SharedPreferences p) {
+            float userPeriod = p.getFloat("userPeriod", 0), handPeak = p.getFloat("userHandPeak", 0);
+            if (userPeriod > 0) pedo.maxStepS = Math.max(0.75f, Math.min(0.95f, 1.5f * userPeriod));
+            if (p.contains("calFloor")) pedo.floor = p.getFloat("calFloor", 0.12f);
+            else if (handPeak > 0) pedo.floor = Math.max(0.05f, Math.min(0.12f, 0.3f * handPeak));
         }
 
         void start() {
             if (source.equals("counter")) registerCounter(false);
             if (source.equals("detector")) sm.registerListener(this, detector, SensorManager.SENSOR_DELAY_NORMAL, 30_000_000);
             if (source.equals("accel")) startAccel();
-            if (boost) armTrigger();
+            if (boost) {
+                armTrigger();
+                Vehicle.start(app);
+            }
         }
 
         void stop() {
@@ -168,7 +195,10 @@ final class StepEngine {
             // deliver in batches of up to 10 s, but before the sensor's buffer would overflow
             int latencyUs = fifo > 0 ? (int) Math.min(10_000_000L, fifo * 40_000L * 8 / 10) : 0;
             pedo.reset();
+            net.reset();
             sm.registerListener(this, a, 40_000, latencyUs);          // 25 samples a second
+            // where is the phone: proximity reports only on change, so it costs almost nothing
+            if (!source.equals("accel") && proximity != null) sm.registerListener(this, proximity, SensorManager.SENSOR_DELAY_NORMAL);
             // A normal (non-wake-up) sensor loses its data while the phone sleeps, and with no buffer
             // nothing can be batched: only then keep the CPU awake, and only while walking.
             if (a == accel || fifo == 0) holdWake();
@@ -178,6 +208,7 @@ final class StepEngine {
         private void stopAccel() {
             if (wakeAccel != null) sm.unregisterListener(this, wakeAccel);
             if (accel != null) sm.unregisterListener(this, accel);
+            if (proximity != null) sm.unregisterListener(this, proximity);
             releaseWake();
             accelOn = false;
         }
@@ -224,16 +255,25 @@ final class StepEngine {
                     if (!fusion.active() || fusion.stopped()) startBout(ts);
                 }
             } else if (type == Sensor.TYPE_ACCELEROMETER) {
-                int n = pedo.onSample(e.values[0], e.values[1], e.values[2], ts);
+                long r0 = pedo.rhythmSteps;
+                int peaks = pedo.onSample(e.values[0], e.values[1], e.values[2], ts);
+                int model = net.onSample(e.values[0], e.values[1], e.values[2], 0, ts);
                 if (source.equals("accel")) {
-                    if (n > 0) stored("accel", ts, n);
+                    if (peaks > 0) stored("accel", ts, peaks);
                     return;
                 }
-                fusion.motion(n, ts);
+                place.onAccel(e.values[0], e.values[1], e.values[2], ts);
+                // the model counts only while the peak counter agrees it's walking (it never saw cars in training)
+                fusion.motion(HAND_MOTION_NET ? (pedo.walking ? model : 0) : peaks, ts);
+                fusion.rhythm((int) (pedo.rhythmSteps - r0), ts);
                 if (ts - lastTickNs >= 1_000_000_000L) {
                     lastTickNs = ts;
+                    fusion.vote(place.current(ts), ts);
+                    if (pedo.walking) { periodSum += pedo.period; periodN++; }
                     tick(ts);
                 }
+            } else if (type == Sensor.TYPE_PROXIMITY) {
+                place.onProximity(e.values[0] < Math.min(5f, e.sensor.getMaximumRange()), ts);
             }
         }
 
@@ -245,6 +285,10 @@ final class StepEngine {
             boolean resuming = fusion.active();
             fusion.start(ts);
             if (!resuming) {
+                fusion.vehicleAt = Vehicle.available(app) ? ns -> Vehicle.at(app, ns) : null;
+                place.resetVotes();
+                periodSum = 0;
+                periodN = 0;
                 disarmTrigger();
                 lastRaw = -1;
                 registerCounter(true);
@@ -298,7 +342,29 @@ final class StepEngine {
                     added += e.getValue();
                 }
             }
+            long removed = 0;
+            if (fusion.vehicle) {
+                // fake chip steps in a vehicle: take them off the buckets they were counted in
+                ZoneId zone = ZoneId.systemDefault();
+                long now = System.currentTimeMillis();
+                for (Map.Entry<Long, Long> e : fusion.chipBySecond.entrySet()) {
+                    repo.addMinus(wallMs(e.getKey() * 1_000_000_000L), e.getValue(), zone, now);
+                    removed += e.getValue();
+                }
+            }
             SharedPreferences p = StepStore.prefs(app);
+            if (fusion.agreed && periodN >= 10) {
+                // chip and motion agreed: this bout is a trustworthy sample of how this person walks
+                SharedPreferences.Editor ed = p.edit();
+                float period = periodSum / periodN, old = p.getFloat("userPeriod", 0);
+                ed.putFloat("userPeriod", old == 0 ? period : 0.8f * old + 0.2f * period);
+                if (fusion.place == Placement.HAND && pedo.medianPeak() > 0) {
+                    float hp = p.getFloat("userHandPeak", 0);
+                    ed.putFloat("userHandPeak", hp == 0 ? pedo.medianPeak() : 0.8f * hp + 0.2f * pedo.medianPeak());
+                }
+                ed.apply();
+                learned(p);
+            }
             String today = LocalDate.now().toString();
             boolean same = today.equals(p.getString("dbgDate", ""));
             p.edit().putString("dbgDate", today)
@@ -306,6 +372,8 @@ final class StepEngine {
                     .putLong("dbgMotion", (same ? p.getLong("dbgMotion", 0) : 0) + fusion.motionSteps)
                     .putLong("dbgAdded", (same ? p.getLong("dbgAdded", 0) : 0) + added)
                     .putLong("dbgBouts", (same ? p.getLong("dbgBouts", 0) : 0) + 1)
+                    .putLong("dbgVehicle", (same ? p.getLong("dbgVehicle", 0) : 0) + removed)
+                    .putString("dbgPlace", Placement.NAMES[fusion.place])
                     .apply();
 
             if (source.equals("counter")) registerCounter(false);
@@ -342,7 +410,7 @@ final class StepEngine {
         private String date;
         private long base, firstRaw = -1, counterSteps, detectorSteps, shown = -1, lastPush, lastWidget;
         private boolean pushPending;
-        private AccelPedometer cal;
+        private MotionCounter cal;
         private int calSteps;
 
         Live(Context c, Listener l) {
@@ -386,7 +454,7 @@ final class StepEngine {
 
         void startCalibration() {
             if (accel == null) return;
-            cal = new AccelPedometer();
+            cal = new MotionCounter();
             cal.floor = 0.08f;          // listen for weaker steps than usual; the walk tells us where to set it
             calSteps = 0;
             sm.registerListener(this, accel, 40_000);

@@ -9,10 +9,13 @@ import java.util.TreeMap;
  *
  * A bout starts at the first step. It stops 60 s after the last step (or after 120 s with no
  * chip steps at all, e.g. in a car), then waits 15 s more so late chip reports still land in it.
- * When it closes:
- *   bout steps = max(chip, motion)
- *   but if chip < 20% of motion, keep chip (motion alone is probably a vehicle or typing)
- *   and if motion looks like two bumps per step (too fast, about double the chip), keep chip.
+ * When it closes, by where the phone was for most of the bout (Placement):
+ *   in a vehicle (Activity Recognition, most of the bout)  -> 0: the chip's steps are taken back
+ *   pocket / bag / upright / swinging hand                -> chip (it catches nearly every step there)
+ *   steady hand (screen up)                               -> motion, if higher than the chip
+ *   unknown                                               -> max(chip, motion)  (the old rule)
+ * Motion is also refused when it looks like two bumps per step (about double the chip), and,
+ * only when Activity Recognition isn't available, when the chip saw under 20% of it.
  * Only when motion wins do we hand out extra steps, placed at the seconds they happened.
  * Everything here uses the sensor clock (nanoseconds since boot).
  */
@@ -23,16 +26,23 @@ final class StepFusion {
 
     static final int IDLE = 0, WALKING = 1, STOPPED = 2, CLOSED = 3;
 
-    private final TreeMap<Long, long[]> secs = new TreeMap<>();   // second -> {motion, chip}
+    private final TreeMap<Long, long[]> secs = new TreeMap<>();   // second -> {motion peaks, chip, rhythm}
     private boolean active, stopped;
     private long lastStepNs, lastChipNs, lastCounterNs, stopNs;
 
     float gain = 1f;                        // from calibration: motion steps × gain
+    /** Activity Recognition's answer for a moment (sensor clock ns); null when it isn't available. */
+    java.util.function.LongPredicate vehicleAt;
+
+    private final int[] votes = new int[5];
+    private long lastVoteS = -1;
 
     // result of the last closed bout
     long chipSteps, motionSteps;
-    boolean usedMotion;
+    boolean usedMotion, vehicle, agreed;
+    int place;
     final TreeMap<Long, Long> motionBySecond = new TreeMap<>();   // filled only when motion won
+    final TreeMap<Long, Long> chipBySecond = new TreeMap<>();     // filled only in a vehicle: steps to take back
 
     boolean active() { return active; }
     boolean stopped() { return stopped; }
@@ -48,6 +58,16 @@ final class StepFusion {
         lastStepNs = ns;
         lastChipNs = ns;
         secs.clear();
+        java.util.Arrays.fill(votes, 0);
+        lastVoteS = -1;
+    }
+
+    /** Once a second while walking: where the phone is now. */
+    void vote(int placement, long ns) {
+        long sec = ns / 1_000_000_000L;
+        if (!active || stopped || sec == lastVoteS) return;
+        lastVoteS = sec;
+        votes[placement]++;
     }
 
     /** The step counter reported `delta` more steps, the last one at `ns`. */
@@ -79,6 +99,21 @@ final class StepFusion {
         lastStepNs = ns;
     }
 
+    /** The motion detector's rhythm count (walking time ÷ step period) added `n` steps at `ns`. */
+    void rhythm(int n, long ns) {
+        if (!active || stopped || n <= 0) return;
+        bucket(ns / 1_000_000_000L)[2] += n;
+    }
+
+    /**
+     * Steady-hand estimate from peaks and rhythm: their average, or rhythm alone when peaks are
+     * more than 10% lower (faint steps). Best of the options tried on the Cambridge walks.
+     */
+    static long handEstimate(long peaks, long rhythm) {
+        if (rhythm <= 0) return peaks;
+        return peaks < 0.9 * rhythm ? rhythm : Math.round((peaks + rhythm) / 2.0);
+    }
+
     /** Call regularly. Returns WALKING, STOPPED (turn the accelerometer off), CLOSED (read the result) or IDLE. */
     int tick(long nowNs) {
         if (!active) return IDLE;
@@ -96,30 +131,61 @@ final class StepFusion {
     }
 
     private void close() {
-        long motionRaw = 0, chip = 0, first = -1, last = -1;
+        long motionRaw = 0, chip = 0, rhythmRaw = 0, first = -1, last = -1;
         for (Map.Entry<Long, long[]> e : secs.entrySet()) {
             motionRaw += e.getValue()[0];
             chip += e.getValue()[1];
+            rhythmRaw += e.getValue()[2];
             if (e.getValue()[0] > 0) {
                 if (first < 0) first = e.getKey();
                 last = e.getKey();
             }
         }
-        long motion = Math.round(motionRaw * gain);
+        place = Placement.UNKNOWN;
+        for (int i = 1; i < votes.length; i++) if (votes[i] > votes[place]) place = i;
+        boolean useRhythm = place == Placement.HAND && rhythmRaw > 0;
+        long motion = Math.round((useRhythm ? handEstimate(motionRaw, rhythmRaw) : motionRaw) * gain);
         double rate = first < 0 ? 0 : motion / (double) (last - first + 1);
 
         boolean chipSees = chip >= 0.2 * motion;
         boolean doubled = rate > 2.6 && chip >= 0.4 * motion && chip <= 0.6 * motion;
         chipSteps = chip;
         motionSteps = motion;
-        usedMotion = motion > chip && chipSees && !doubled;
+        boolean arKnown = vehicleAt != null;
+        int stepSecs = 0, vehicleSecs = 0;
+        if (arKnown) {
+            // judged at close time: Activity Recognition reports transitions late, but with the time they happened
+            for (Map.Entry<Long, long[]> e : secs.entrySet()) {
+                if (e.getValue()[0] + e.getValue()[1] == 0) continue;
+                stepSecs++;
+                if (vehicleAt.test(e.getKey() * 1_000_000_000L)) vehicleSecs++;
+            }
+        }
+        vehicle = arKnown && stepSecs > 0 && vehicleSecs * 2 >= stepSecs;
+        agreed = chip > 20 && Math.abs(motion - chip) <= 0.05 * chip;
+        if (vehicle) {
+            usedMotion = false;
+        } else if (place == Placement.HAND) {
+            usedMotion = motion > chip && !doubled && (arKnown || chipSees);
+        } else if (place == Placement.UNKNOWN) {
+            usedMotion = motion > chip && chipSees && !doubled;
+        } else {
+            usedMotion = false;                     // covered, upright, swinging: the chip is better there
+        }
+
+        chipBySecond.clear();
+        if (vehicle) for (Map.Entry<Long, long[]> e : secs.entrySet()) if (e.getValue()[1] > 0) chipBySecond.put(e.getKey(), e.getValue()[1]);
 
         motionBySecond.clear();
         if (usedMotion) {
+            // spread the bout's motion count over the seconds it happened, in proportion to the channel used
+            int ch = useRhythm ? 2 : 0;
+            long chTotal = useRhythm ? rhythmRaw : motionRaw;
+            double per = chTotal == 0 ? 0 : motion / (double) chTotal;
             double carry = 0;
             for (Map.Entry<Long, long[]> e : secs.entrySet()) {
-                if (e.getValue()[0] == 0) continue;
-                carry += e.getValue()[0] * gain;
+                if (e.getValue()[ch] == 0) continue;
+                carry += e.getValue()[ch] * per;
                 long whole = Math.round(carry);
                 if (whole > 0) { motionBySecond.put(e.getKey(), whole); carry -= whole; }
             }
@@ -132,7 +198,7 @@ final class StepFusion {
     private long[] bucket(long s) {
         long[] v = secs.get(s);
         if (v == null) {
-            v = new long[2];
+            v = new long[3];
             secs.put(s, v);
         }
         return v;

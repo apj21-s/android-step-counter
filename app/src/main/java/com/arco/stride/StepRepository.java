@@ -34,6 +34,8 @@ import java.util.Set;
  * legacy_days: history from older versions (day totals only).
  * counter_state: last raw step-counter value, to turn a since-boot total into deltas.
  * hc_written: what we already sent to Health Connect.
+ * bucket_minus: chip steps counted while in a vehicle (Activity Recognition), taken off the
+ *   bucket's value (never below zero).
  */
 public final class StepRepository extends SQLiteOpenHelper {
     static final long BUCKET_MS = 15 * 60_000L;
@@ -47,7 +49,7 @@ public final class StepRepository extends SQLiteOpenHelper {
 
     /** name == null gives an in-memory database (tests). */
     StepRepository(Context c, String name) {
-        super(c, name, null, 1);
+        super(c, name, null, 2);
     }
 
     @Override public void onCreate(SQLiteDatabase db) {
@@ -59,9 +61,33 @@ public final class StepRepository extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE legacy_days (date TEXT PRIMARY KEY, steps INTEGER NOT NULL)");
         db.execSQL("CREATE TABLE counter_state (id INTEGER PRIMARY KEY, last_raw INTEGER NOT NULL, boot_count INTEGER NOT NULL)");
         db.execSQL("CREATE TABLE hc_written (start_ms INTEGER PRIMARY KEY, steps INTEGER NOT NULL)");
+        createMinus(db);
     }
 
-    @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) { }
+    @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if (oldVersion < 2) createMinus(db);
+    }
+
+    private static void createMinus(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE bucket_minus (start_ms INTEGER PRIMARY KEY, date TEXT NOT NULL, steps INTEGER NOT NULL)");
+    }
+
+    /** Take `steps` off the bucket holding `atMs` (fake steps counted in a vehicle). */
+    synchronized void addMinus(long atMs, long steps, ZoneId zone, long now) {
+        if (steps <= 0) return;
+        long start = bucketStart(atMs);
+        String date = dateOf(start, zone);
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.execSQL("INSERT OR IGNORE INTO bucket_minus (start_ms, date, steps) VALUES (?, ?, 0)", new Object[]{start, date});
+            db.execSQL("UPDATE bucket_minus SET steps = steps + ? WHERE start_ms = ?", new Object[]{steps, start});
+            recomputeDay(db, date, now);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
 
     static long bucketStart(long ms) { return ms - Math.floorMod(ms, BUCKET_MS); }
 
@@ -162,6 +188,10 @@ public final class StepRepository extends SQLiteOpenHelper {
 
     /** Day total = sum over buckets of the largest source in each bucket (or migrated history if larger). */
     private void recomputeDay(SQLiteDatabase db, String date, long now) {
+        Map<Long, Long> minus = new HashMap<>();
+        Cursor mc = db.rawQuery("SELECT start_ms, steps FROM bucket_minus WHERE date = ?", new String[]{date});
+        while (mc.moveToNext()) minus.put(mc.getLong(0), mc.getLong(1));
+        mc.close();
         Cursor c = db.rawQuery("SELECT start_ms, source, steps FROM step_buckets WHERE date = ? ORDER BY start_ms, steps DESC, source", new String[]{date});
         long total = 0, lastStart = Long.MIN_VALUE;
         Map<String, Long> bySource = new HashMap<>();
@@ -170,7 +200,8 @@ public final class StepRepository extends SQLiteOpenHelper {
             if (start == lastStart) continue;           // a smaller source in the same bucket
             lastStart = start;
             String source = c.getString(1);
-            long steps = c.getLong(2);
+            Long m = minus.get(start);
+            long steps = Math.max(0, c.getLong(2) - (m == null ? 0 : m));
             total += steps;
             Long sum = bySource.get(source);
             bySource.put(source, (sum == null ? 0 : sum) + steps);
@@ -260,7 +291,8 @@ public final class StepRepository extends SQLiteOpenHelper {
         int n = (int) ((end - start) / 3_600_000L);
         long[] out = new long[n];
         Cursor c = getReadableDatabase().rawQuery(
-                "SELECT start_ms, MAX(steps) FROM step_buckets WHERE start_ms >= ? AND start_ms < ? GROUP BY start_ms",
+                "SELECT b.start_ms, MAX(MAX(b.steps) - IFNULL(m.steps, 0), 0) FROM step_buckets b LEFT JOIN bucket_minus m ON m.start_ms = b.start_ms"
+                        + " WHERE b.start_ms >= ? AND b.start_ms < ? GROUP BY b.start_ms",
                 new String[]{String.valueOf(start), String.valueOf(end)});
         while (c.moveToNext()) {
             int h = (int) ((c.getLong(0) - start) / 3_600_000L);
@@ -279,11 +311,12 @@ public final class StepRepository extends SQLiteOpenHelper {
         return out;
     }
 
-    /** Buckets whose value (largest source) changed since we last sent it to Health Connect: {start, steps}. */
+    /** Buckets whose value (largest source, less vehicle steps) changed since we last sent it to Health Connect: {start, steps}. */
     synchronized List<long[]> changedForHealth(long fromMs) {
         List<long[]> out = new ArrayList<>();
         Cursor c = getReadableDatabase().rawQuery(
-                "SELECT b.start_ms, MAX(b.steps), h.steps FROM step_buckets b LEFT JOIN hc_written h ON h.start_ms = b.start_ms"
+                "SELECT b.start_ms, MAX(MAX(b.steps) - IFNULL(m.steps, 0), 0), h.steps FROM step_buckets b"
+                        + " LEFT JOIN hc_written h ON h.start_ms = b.start_ms LEFT JOIN bucket_minus m ON m.start_ms = b.start_ms"
                         + " WHERE b.start_ms >= ? GROUP BY b.start_ms", new String[]{String.valueOf(fromMs)});
         while (c.moveToNext()) {
             long steps = c.getLong(1);

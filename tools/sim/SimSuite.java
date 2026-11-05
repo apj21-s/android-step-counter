@@ -201,7 +201,7 @@ public class SimSuite {
 
     /** New: motion detector on only during bouts, 25 Hz, bout max rule, 15-min buckets. Returns {total, accelOnSeconds, bouts}. */
     static long[] runNew(Scenario s, double[] counted, List<double[]> events) {
-        AccelPedometer p = new AccelPedometer();
+        MotionCounter p = new MotionCounter();
         StepFusion f = new StepFusion();
         Sig sig = s.sig.get();
         Random r = new Random(12);
@@ -249,7 +249,12 @@ public class SimSuite {
     }
 
     /** Old detector alone at 50 Hz, new detector alone at 25 Hz (no chip). */
-    static int detectorOnly(Scenario s, boolean old) {
+    static int detectorOnly(Scenario s, boolean old) { return detectorOnly(s, old ? 0 : 1); }
+
+    /** which: 0 = old 50 Hz, 1 = AccelPedometer, 2 = MotionCounter */
+    static int detectorOnly(Scenario s, int which) {
+        boolean old = which == 0;
+        MotionCounter mc = new MotionCounter();
         Sig sig = s.sig.get();
         Random r = new Random(13);
         OldAccelPedometer po = new OldAccelPedometer();
@@ -259,7 +264,7 @@ public class SimSuite {
         for (double t = 0; t < s.secs; t += 1 / hz) {
             theta += 0.002 * Math.sin(t);
             float[] a = sample(9.81 + sig.at(t) + 0.15 * r.nextGaussian(), theta, r);
-            total += old ? po.onSample(a[0], a[1], a[2], ns(t)) : pn.onSample(a[0], a[1], a[2], ns(t));
+            total += old ? po.onSample(a[0], a[1], a[2], ns(t)) : which == 1 ? pn.onSample(a[0], a[1], a[2], ns(t)) : mc.onSample(a[0], a[1], a[2], ns(t));
         }
         return total;
     }
@@ -285,10 +290,10 @@ public class SimSuite {
         }
 
         System.out.println();
-        System.out.println("== Motion detector alone, no chip (old at 50 Hz, new at 25 Hz)");
+        System.out.println("== Motion detector alone, no chip (old at 50 Hz, AccelPedometer and MotionCounter at 25 Hz)");
         for (Scenario s : list)
-            System.out.printf(Locale.US, "%-32s %6d %10s %10s%n", s.name, s.steps.length,
-                pct(detectorOnly(s, true), s.steps.length), pct(detectorOnly(s, false), s.steps.length));
+            System.out.printf(Locale.US, "%-32s %6d %10s %10s %10s%n", s.name, s.steps.length,
+                pct(detectorOnly(s, 0), s.steps.length), pct(detectorOnly(s, 1), s.steps.length), pct(detectorOnly(s, 2), s.steps.length));
 
         System.out.println();
         System.out.println("== Late chip: counts every step perfectly, 10 s late, timestamps = delivery time (worst case)");

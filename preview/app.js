@@ -576,7 +576,26 @@
       stepTo(st.steps);
       renderHours();
     };
-    // Calibration walks
+    // Lab mode: hold "Accuracy check" for a second to show it
+    let labHold = 0;
+    $('#testTitle').addEventListener('pointerdown', () => { labHold = setTimeout(() => { $('#lab').hidden = false; A.vibrate(30); }, 900); });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('#testTitle').addEventListener(ev, () => clearTimeout(labHold));
+    let labOn = false;
+    $('#labBtn').addEventListener('click', () => {
+      if (!labOn) {
+        labOn = true; A.labStart($('#labPlace').value); $('#labBtn').textContent = 'Stop';
+        $('#labMsg').textContent = 'Recording. Walk and count your steps, then tap Stop.';
+        return;
+      }
+      const car = $('#labPlace').value === 'car';
+      const t = car ? 0 : parseInt(prompt('How many steps did you count?') || '', 10);
+      if (!car && !(t > 0)) return;            // keep recording until a count is entered
+      labOn = false; $('#labBtn').textContent = 'Start';
+      const r = JSON.parse(A.labStop(t));
+      $('#labMsg').textContent = r.error ? 'Not saved: ' + r.error
+        : `You ${t} · chip ${r.chip} · peaks ${r.peaks} · model ${r.modelWalking} · saved ${r.file}`;
+    });
+        // Calibration walks
     let calPlace = null;
     for (const [id, place, label] of [['#calHand', 'hand', 'In hand'], ['#calPocket', 'pocket', 'In pocket']]) {
       $(id).addEventListener('click', () => {

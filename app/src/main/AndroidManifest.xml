@@ -31,6 +31,8 @@
         <service android:name=".StepSyncJob" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
+        <receiver android:name=".Vehicle" android:exported="false" />
+
         <activity android:name=".PrivacyActivity" android:exported="false" android:label="Stride privacy" />
         <!-- Android 14+: shown from the Health Connect permission screen -->
         <activity-alias android:name="ViewPermissionUsageActivity" android:exported="true"

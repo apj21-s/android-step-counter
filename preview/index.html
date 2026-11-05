@@ -180,7 +180,7 @@
                 </div>
               </div>
               <div class="card test">
-                <div class="eyebrow">Accuracy check</div>
+                <div class="eyebrow" id="testTitle">Accuracy check</div>
                 <div class="tc" id="testCount">0</div>
                 <div class="t-status" id="testStatus">Walk exactly 100 steps to see how accurate your phone is.</div>
                 <div class="t-result" id="testResult"></div>
@@ -191,6 +191,20 @@
                   <div class="hint">Walk exactly 100 steps, then tap Done. Once in hand, once in a pocket.</div>
                   <div class="cal-row"><button class="btn ghost small" id="calHand">In hand</button><button class="btn ghost small" id="calPocket">In pocket</button></div>
                   <div class="hint" id="calMsg"></div>
+                </div>
+                <div class="cal device-only" id="lab" hidden>
+                  <div class="eyebrow">Lab mode</div>
+                  <div class="hint">Records raw sensors while you walk and count steps by hand. Saved to Download/Stride lab.</div>
+                  <div class="cal-row">
+                    <select id="labPlace" class="btn ghost small">
+                      <option value="hand">Hand, steady</option><option value="typing">Hand, typing</option>
+                      <option value="swing">Hand, swinging</option><option value="pocket_front">Front pocket</option>
+                      <option value="pocket_back">Back pocket</option><option value="bag">Bag</option>
+                      <option value="car">Car / bus (0 steps)</option>
+                    </select>
+                    <button class="btn ghost small" id="labBtn">Start</button>
+                  </div>
+                  <div class="hint" id="labMsg"></div>
                 </div>
                 <div class="hint preview-only">Simulated in this preview</div>
               </div>
