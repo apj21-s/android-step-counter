@@ -3,7 +3,7 @@
 #   tools/phone/battery.sh          since the phone was last unplugged from the charger
 # Look at: the "Uid u0a..." power line for Stride, its wake lock time, and its sensor time.
 ADB=${ADB:-$HOME/Android/Sdk/platform-tools/adb}
-UID_=$("$ADB" shell dumpsys package com.arco.stride | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1)
+UID_=$("$ADB" shell dumpsys package com.arco.stride | sed -n 's/.*\(userId\|appId\)=\([0-9]*\).*/\2/p' | head -1)
 [ -n "$UID_" ] || { echo "Stride not found (phone connected? USB debugging on?)"; exit 1; }
 APPID=$((UID_ - 10000))
 echo "Stride uid $UID_ (u0a$APPID). Since last unplugged:"
