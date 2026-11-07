@@ -26,27 +26,44 @@ public class BoutStorageTest {
 
     private static long wall(long ns) { return BASE + ns / 1_000_000L; }
 
-    /** Walk for 50 s, then a car from 50 s to 400 s with 40 fake chip steps (and `carMotion` fake motion steps). */
-    private StepFusion walkThenCar(int place, int walkChipPerS, int walkMotionPerS, int carMotion) {
+    /** What the walk's bout decided (the first bout to close). */
+    private boolean walkUsedMotion;
+    private long walkMotionSteps;
+
+    /**
+     * Walk for 50 s, then a car from 50 s to 400 s with 40 fake chip steps (and `carMotion` fake motion
+     * steps). Like the phone: a step starts a bout when none is open, and each bout is stored when it closes.
+     * Returns {boost added, vehicle steps removed} over all bouts.
+     */
+    private long[] walkThenCar(int place, int walkChipPerS, int walkMotionPerS, int carMotion) {
         StepFusion f = new StepFusion();
         f.vehicleAt = ns -> ns >= 50 * S && ns < 400 * S;
-        f.start(S);
-        int fakeChip = 0, fakeMotion = 0;
-        for (long sec = 1; sec <= 400; sec++) {
+        long[] total = new long[2];
+        int fakeChip = 0, fakeMotion = 0, closed = 0;
+        for (long sec = 1; sec <= 520; sec++) {
             long t = sec * S;
+            long chip = 0;
+            int motion = 0;
             if (sec <= 50) {
-                f.chip(walkChipPerS, t);
-                f.motion(walkMotionPerS, t);
-            } else {
-                if (sec >= 120 && sec % 5 == 0 && fakeChip < 40) { f.chip(1, t); fakeChip++; }
-                if (sec >= 100 && sec % 4 == 0 && fakeMotion < carMotion) { f.motion(1, t); fakeMotion++; }
+                chip = walkChipPerS;
+                motion = walkMotionPerS;
+            } else if (sec < 400) {
+                if (sec >= 120 && sec % 5 == 0 && fakeChip < 40) { chip = 1; fakeChip++; }
+                if (sec >= 100 && sec % 4 == 0 && fakeMotion < carMotion) { motion = 1; fakeMotion++; }
             }
+            if ((chip > 0 || motion > 0) && (!f.active() || f.stopped())) f.start(t);
+            f.chip(chip, t);
+            f.motion(motion, t);
             f.vote(place, t);
-            f.tick(t);
+            if (f.tick(t) == StepFusion.CLOSED) {
+                if (closed++ == 0) { walkUsedMotion = f.usedMotion; walkMotionSteps = f.motionSteps; }
+                long[] r = StepEngine.applyBout(repo, f, BoutStorageTest::wall, ZONE, 2);
+                total[0] += r[0];
+                total[1] += r[1];
+            }
         }
-        long t = 400 * S;
-        while (f.active()) { t += S; f.tick(t); }
-        return f;
+        assertTrue("all bouts closed", !f.active());
+        return total;
     }
 
     /** The Recording API's bucket holds the same chip steps, fake ones included. */
@@ -56,8 +73,7 @@ public class BoutStorageTest {
 
     @Test public void carStepsAreLeftOutOfTheStoredTotal() {
         syncRecording(100 + 40);                                   // 100 real (walk) + 40 fake (car)
-        StepFusion f = walkThenCar(Placement.UPRIGHT, 2, 2, 0);
-        long[] r = StepEngine.applyBout(repo, f, BoutStorageTest::wall, ZONE, 2);
+        long[] r = walkThenCar(Placement.UPRIGHT, 2, 2, 0);
         assertEquals(40, r[1]);
         assertEquals(100, repo.day("2026-11-05"));
         syncRecording(100 + 40);                                   // a later sync doesn't bring them back
@@ -68,10 +84,9 @@ public class BoutStorageTest {
     @Test public void phoneFlatInCarAddsNoMotionSteps() {
         // flat phone reads as steady hand: motion would win; 60 fake motion steps happen in the car
         syncRecording(50 + 40);                                    // chip: 50 real + 40 fake
-        StepFusion f = walkThenCar(Placement.HAND, 1, 2, 60);      // walk: chip 50, motion 100
-        StepEngine.applyBout(repo, f, BoutStorageTest::wall, ZONE, 2);
-        assertTrue(f.usedMotion);
-        assertEquals(100, f.motionSteps);                          // the car's motion steps never counted
+        walkThenCar(Placement.HAND, 1, 2, 60);                     // walk: chip 50, motion 100
+        assertTrue(walkUsedMotion);
+        assertEquals(100, walkMotionSteps);                        // the car's motion steps never counted
         // stored: chip source 90 - 40 = 50, boost 100 -> 100 (subtracting from the boost would give 60)
         assertEquals(100, repo.day("2026-11-05"));
     }

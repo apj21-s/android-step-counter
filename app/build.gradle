@@ -6,8 +6,8 @@ android {
         applicationId 'com.arco.stride'
         minSdk 29
         targetSdk 36
-        versionCode 4
-        versionName '3.1'
+        versionCode 5
+        versionName '3.2'
     }
     // Always the same key (see ~/Documents/stride-keys/README.txt): phones only accept updates signed
     // with the key they were installed with. If the file is missing the build stops instead of

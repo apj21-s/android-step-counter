@@ -36,7 +36,7 @@ import java.util.TreeMap;
  * An alarm (not a timer, which stops while the phone sleeps) closes the bout after you stop.
  * with the proximity sensor (where is the phone?). StepFusion picks chip or motion by position,
  * and takes chip steps back when Activity Recognition says it was a vehicle. Motion = MotionCounter
- * peaks, plus its rhythm count for a steady hand (or StepNet, see HAND_MOTION_NET). Off 60 s after the last step.
+ * peaks, plus its rhythm count for a steady hand (or StepNet, see HAND_MOTION_NET). Off 20 s after the last step.
  * Steady-hand bouts where chip and motion agree teach the detector how strongly this person's
  * phone bounces (limited, slow, resettable in Settings). Step timing is never learned.
  *
@@ -155,7 +155,8 @@ final class StepEngine {
         private final int pacedLatencyUs;
         private long alarmAt;
         private final android.app.AlarmManager.OnAlarmListener boutAlarm = () -> { alarmAt = 0; tick(SystemClock.elapsedRealtimeNanos()); };
-        private boolean accelOn, detectorForChip;
+        private boolean accelOn, detectorForChip, proxOn;
+        private long proxAt;
         private long lastRaw = -1, lastTickNs, lastWidget, lastAccelNs;
 
         Background(Context c) {
@@ -261,8 +262,10 @@ final class StepEngine {
                 sm.registerListener(this, wakeDetector, SensorManager.SENSOR_DELAY_NORMAL, pacedLatencyUs);
             }
             sm.registerListener(this, a, 40_000, latencyUs);          // 25 samples a second
-            // where is the phone: proximity reports only on change, so it costs almost nothing
-            if (!source.equals("accel") && proximity != null) sm.registerListener(this, proximity, SensorManager.SENSOR_DELAY_NORMAL);
+            // where is the phone: proximity shines infrared while on, so it's only looked at now and then
+            proxOn = false;
+            proxAt = Long.MIN_VALUE / 2;
+            proximityDuty(SystemClock.elapsedRealtimeNanos());
             // A normal (non-wake-up) sensor loses its data while the phone sleeps, and with no buffer
             // nothing can be batched: only then keep the CPU awake, and only while walking.
             if (!paced && (a == accel || fifo == 0)) holdWake();
@@ -273,12 +276,30 @@ final class StepEngine {
             if (wakeAccel != null) sm.unregisterListener(this, wakeAccel);
             if (accel != null) sm.unregisterListener(this, accel);
             if (proximity != null) sm.unregisterListener(this, proximity);
+            proxOn = false;
             releaseWake();
             accelOn = false;
             if (paced && boost) {
                 // back to waking at the very first step (the bout may resume during the grace period)
                 sm.unregisterListener(this, wakeDetector);
                 sm.registerListener(this, wakeDetector, SensorManager.SENSOR_DELAY_NORMAL);
+            }
+        }
+
+        /**
+         * Proximity on for 3 s every 30 s while walking (the last reading is kept in between: a phone
+         * rarely goes in or out of a pocket mid-walk). Called once a second of sensor time.
+         */
+        private void proximityDuty(long ts) {
+            if (proximity == null || source.equals("accel")) return;
+            if (proxOn && ts - proxAt >= 3_000_000_000L) {
+                sm.unregisterListener(this, proximity);
+                proxOn = false;
+                proxAt = ts;
+            } else if (!proxOn && ts - proxAt >= 30_000_000_000L) {
+                sm.registerListener(this, proximity, SensorManager.SENSOR_DELAY_NORMAL);
+                proxOn = true;
+                proxAt = ts;
             }
         }
 
@@ -340,6 +361,7 @@ final class StepEngine {
                 fusion.rhythm((int) (pedo.rhythmSteps - r0), ts);
                 if (ts - lastTickNs >= 1_000_000_000L) {
                     lastTickNs = ts;
+                    proximityDuty(ts);
                     fusion.vote(place.current(ts), ts);
                     if (pedo.walking) periodN++;
                     tick(ts);

@@ -69,11 +69,18 @@ public class LabReplay {
         long first = -1, lastCounter = -1, peaks = 0, rhythm = 0, t = 0, lastTick = 0;
         double model = 0;
         long lastAccel = 0;
+        int lastState = -1;
         for (String l : lines) {
             if (l.startsWith("#")) continue;
             String[] r = l.split(",");
             t = Long.parseLong(r[0]);
-            if (first < 0) { first = t; fusion.start(t); }
+            // the bout starts at the first motion sample: the first step-counter row carries the time
+            // of the last step BEFORE the recording (it's the counter's current value at registration)
+            if (first < 0 && r[1].equals("A")) { first = t; fusion.start(t); }
+            if (first < 0) {
+                if (r[1].equals("C")) lastCounter = (long) Float.parseFloat(r[2]);
+                continue;
+            }
             switch (r[1]) {
                 case "A": {
                     if (t - lastAccel < 38_000_000L && t > lastAccel) break;   // 25 a second, like the app
@@ -89,7 +96,14 @@ public class LabReplay {
                     place.onAccel(x, y, z, t);
                     fusion.motion(n, t);
                     fusion.rhythm((int) (mc.rhythmSteps - rb), t);
-                    if (t - lastTick >= 1_000_000_000L) { lastTick = t; fusion.vote(place.current(t), t); fusion.tick(t); }
+                    if (t - lastTick >= 1_000_000_000L) {
+                        lastTick = t;
+                        fusion.vote(place.current(t), t);
+                        int st = fusion.tick(t);
+                        if (st != lastState && System.getenv("DEBUG") != null)
+                            System.err.printf("  %5.1f s  bout %s  (peaks so far %d)%n", (t - first) / 1e9, new String[]{"idle", "walking", "stopped", "closed"}[st], peaks);
+                        lastState = st;
+                    }
                     break;
                 }
                 case "C": {
@@ -105,6 +119,9 @@ public class LabReplay {
             }
         }
         for (int i = 0; i < 200 && fusion.active(); i++) { t += 1_000_000_000L; fusion.tick(t); }
+        if (System.getenv("DEBUG") != null)
+            System.err.printf("  bout: chip %d motion %d usedMotion %s place %s closedAtRecordingEnd %s%n", fusion.chipSteps, fusion.motionSteps,
+                    fusion.usedMotion, Placement.NAMES[fusion.place], !fusion.active());
         long removed = fusion.chipBySecond.values().stream().mapToLong(Long::longValue).sum();
         boolean motion = fusion.usedMotion && !(chipOnlyInHand && fusion.place == Placement.HAND);
         double appTotal = (motion ? Math.max(fusion.motionSteps, fusion.chipSteps) : fusion.chipSteps);

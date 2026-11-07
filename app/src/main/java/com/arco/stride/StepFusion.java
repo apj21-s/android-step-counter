@@ -7,7 +7,7 @@ import java.util.TreeMap;
  * One walking bout at a time: chip steps vs motion-detector steps, never added together.
  * Plain Java (no Android classes) so it can be tested on a computer.
  *
- * A bout starts at the first step. It stops 60 s after the last step (or after 120 s with no
+ * A bout starts at the first step. It stops 20 s after the last step (or after 120 s with no
  * chip steps at all, e.g. in a car), then waits 15 s more so late chip reports still land in it.
  * When it closes, by where the phone was for most of the bout (Placement):
  *   seconds in a vehicle (Activity Recognition, with 30 s of vehicle on both sides) -> the chip's
@@ -21,7 +21,9 @@ import java.util.TreeMap;
  * Everything here uses the sensor clock (nanoseconds since boot).
  */
 final class StepFusion {
-    static final long STOP_NS = 60_000_000_000L;
+    // 20 s (was 60 s): on a phone the motion sensor runs until the bout stops, and most of its
+    // on-time was this tail after short moves. A longer pause just starts a new bout at the next step.
+    static final long STOP_NS = 20_000_000_000L;
     static final long GRACE_NS = 15_000_000_000L;
     static final long NO_CHIP_NS = 120_000_000_000L;
 
