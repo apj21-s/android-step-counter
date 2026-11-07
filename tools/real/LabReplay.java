@@ -60,6 +60,7 @@ public class LabReplay {
         Placement place = new Placement();
         StepNet net = StepNet.standard();
         StepFusion fusion = new StepFusion();
+        fusion.gain = Float.parseFloat(System.getenv().getOrDefault("GAIN", "1"));   // calibration gain, as on the phone
         if (!vehicle.isEmpty()) fusion.vehicleAt = ns -> {
             boolean in = false;
             for (long[] v : vehicle) { if (v[0] > ns) break; in = v[1] == 1; }

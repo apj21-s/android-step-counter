@@ -68,7 +68,18 @@ Decisions, each only if your recordings support it:
 - **Detector:** re-tune MotionCounter on Cambridge + your walks; keep only changes that improve both.
 - **Model:** `sync.sh --train`; switch counting to the model only if it beats the detector on your held-out walks.
 
+## 5b. Results so far (your recordings, 7 Nov, 5 walks)
+| Walk | You | Chip | Stride stores | Notes |
+|---|---|---|---|---|
+| Hand, steady | 122 | 122 (0%) | 125 (+2.5%) -> 122 (0%) after calibration | this walk set the calibration |
+| Typing | 111 | 108 (-2.7%) | 113 (+1.8%) -> 110 (-0.9%) after calibration | not used for calibration |
+| Back pocket | 141 | 143 (+1.4%) | 143 (+1.4%) | read as "covered": proximity works with the screen off |
+| Front pocket | 121 | 119 (-1.7%) | 119 (-1.7%) | read as "covered" |
+| Swinging hand | 105 | 94 (-10.5%) | 94 (-10.5%) | weakest case; read as "upright"; detector confirmed walking 12 s late and got one peak per two steps |
+Too few walks to change any rule yet. Next recordings that matter most: swinging hand x3, typing/hand x2 more, bag, short walks, bus/car.
+
 ## 6. Open items
 - Motorola Sleep mode kills background apps at night; Recording API still counts, but walks during that time get no motion help. Phone setting, not app code.
 - Most of 7 Nov's steps show in the midnight hour: check whether that was real walking or a bucket-time bug (debug line in Settings shows sources).
-- Proximity with the screen off, swinging hand, and paced mode are unproven until your recordings and a normal day of use.
+- Swinging hand: the chip misses ~10% and the motion detector does worse; needs more recordings before changing anything (ideas: rhythm credit-back for the late start, swing detection threshold).
+- Paced low-power mode is unproven until a normal day of use.
