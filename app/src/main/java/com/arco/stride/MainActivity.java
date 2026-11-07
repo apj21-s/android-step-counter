@@ -31,6 +31,7 @@ public class MainActivity extends Activity {
     @SuppressLint("SetJavaScriptEnabled")   // the WebView only ever loads Stride's own bundled page
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        LabRecorder.recoverLeftover(this);          // a recording cut off by a kill: save what there is
         root = new FrameLayout(this);
         web = new WebView(this);
         WebSettings ws = web.getSettings();
@@ -43,7 +44,8 @@ public class MainActivity extends Activity {
         setContentView(root);
         if (Build.VERSION.SDK_INT >= 35) {           // Android 15+ draws edge to edge: keep content off the bars
             root.setOnApplyWindowInsetsListener((v, in) -> {
-                Insets i = in.getInsets(WindowInsets.Type.systemBars());
+                // the keyboard counts too, so a focused text box is never hidden behind it
+                Insets i = Insets.max(in.getInsets(WindowInsets.Type.systemBars()), in.getInsets(WindowInsets.Type.ime()));
                 v.setPadding(i.left, i.top, i.right, i.bottom);
                 return WindowInsets.CONSUMED;
             });
@@ -163,36 +165,47 @@ public class MainActivity extends Activity {
             else runOnUiThread(() -> requestPermissions(new String[]{HealthShare.PERMISSION}, ASK_HEALTH));
         }
 
-        @JavascriptInterface public void calStart() { runOnUiThread(StepEngine::startCalibration); }
-
-        /** End a calibration walk of 100 steps. Returns what the motion detector counted (0 = failed). */
-        @JavascriptInterface public int calStop(String place) {
-            float[] r = StepEngine.stopCalibration();
-            int steps = Math.round(r[0]);
-            if (steps < 50) return steps;                                     // too far off to trust
-            SharedPreferences p = StepStore.prefs(MainActivity.this);
-            float gain = Math.max(0.8f, Math.min(1.25f, 100f / steps));
-            float floor = Math.max(0.08f, Math.min(0.2f, r[1] * 0.4f));       // 40% of a typical step peak
-            SharedPreferences.Editor e = p.edit().putFloat("gain_" + place, gain).putFloat("floor_" + place, floor);
-            // use the average gain and the lower floor of the walks done so far
-            float gHand = place.equals("hand") ? gain : p.getFloat("gain_hand", -1);
-            float gPocket = place.equals("pocket") ? gain : p.getFloat("gain_pocket", -1);
-            float fHand = place.equals("hand") ? floor : p.getFloat("floor_hand", 1);
-            float fPocket = place.equals("pocket") ? floor : p.getFloat("floor_pocket", 1);
-            float g = gHand > 0 && gPocket > 0 ? (gHand + gPocket) / 2 : Math.max(gHand, gPocket);
-            e.putFloat("calGain", g).putFloat("calFloor", Math.min(fHand, fPocket)).apply();
-            runOnUiThread(() -> {                                              // restart so the new values apply
-                StepService.stop(MainActivity.this);
-                StepService.start(MainActivity.this);
-            });
-            return steps;
+        /**
+         * Record a walk you count by hand (calibration and Lab recordings are the same thing).
+         * place: hand, typing, swing, pocket_front, pocket_back, bag, car. Returns "" or an error message.
+         */
+        @JavascriptInterface public String recStart(String place) {
+            String err = LabRecorder.start(MainActivity.this, place);
+            return err == null ? "" : err;
         }
 
-        /** Lab mode: record raw sensors for a hand-counted walk. place: hand, typing, pocket_front, pocket_back, bag, swing. */
-        @JavascriptInterface public void labStart(String place) { LabRecorder.start(MainActivity.this, place); }
+        @JavascriptInterface public String recStatus() { return LabRecorder.status(); }
 
-        /** Stop, save to Download/Stride lab, and return {truth, chip, detector, peaks, model, file} as JSON. */
-        @JavascriptInterface public String labStop(int truth) { return LabRecorder.stop(truth); }
+        @JavascriptInterface public void recCancel() { LabRecorder.cancel(MainActivity.this); }
+
+        @JavascriptInterface public String recList() { return LabRecorder.list(MainActivity.this); }
+
+        /**
+         * Stop and save. With calibrate=true and a steady-hand walk of 50+ steps, the motion detector's
+         * gain and smallest step are set from it (motion only counts for a steady hand; elsewhere the
+         * chip is used, so other positions just report how the chip did).
+         */
+        @JavascriptInterface public String recStop(int truth, boolean calibrate) {
+            String json = LabRecorder.stop(MainActivity.this, truth);
+            try {
+                org.json.JSONObject o = new org.json.JSONObject(json);
+                boolean hand = "hand".equals(o.optString("place")) || "typing".equals(o.optString("place"));
+                long est = o.optLong("hand");
+                if (calibrate && hand && truth >= 50 && est > 0 && !o.has("error")) {
+                    float gain = Math.max(0.8f, Math.min(1.25f, truth / (float) est));
+                    float floor = Math.max(0.05f, Math.min(0.15f, 0.4f * (float) o.optDouble("medianPeak", 0.3)));
+                    edit().putFloat("calGain", gain).putFloat("calFloor", floor).apply();
+                    o.put("calibrated", true).put("gain", gain);
+                    runOnUiThread(() -> {                                      // restart so the new values apply
+                        StepService.stop(MainActivity.this);
+                        StepService.start(MainActivity.this);
+                    });
+                }
+                return o.toString();
+            } catch (org.json.JSONException e) {
+                return json;
+            }
+        }
 
         /** Forget what Stride learned from your walks (and the calibration walks). */
         @JavascriptInterface public void learnReset() {
@@ -204,7 +217,7 @@ public class MainActivity extends Activity {
             });
         }
 
-        @JavascriptInterface public void calReset() {
+        private void calReset() {
             edit().remove("calGain").remove("calFloor").remove("gain_hand").remove("gain_pocket")
                     .remove("floor_hand").remove("floor_pocket").apply();
         }

@@ -13,7 +13,8 @@ import java.time.ZoneId;
 /**
  * Background sync without keeping anything running:
  *  - every ~1 hour: read the Recording API and redraw widgets,
- *  - just after midnight: so widgets switch to the new day.
+ *  - just after midnight: so widgets switch to the new day,
+ *  - both times: restart the step service if something killed it.
  */
 public class StepSyncJob extends JobService {
     static final int HOURLY = 1, MIDNIGHT = 2;
@@ -41,6 +42,9 @@ public class StepSyncJob extends JobService {
 
     @Override public boolean onStartJob(JobParameters params) {
         if (params.getJobId() == MIDNIGHT) scheduleMidnight(this);
+        // watchdog: phone makers' battery savers (e.g. Motorola Sleep mode) kill the service and nothing
+        // restarts it. Android only allows this restart when Stride is exempt from battery optimisation.
+        StepService.start(this);
         StepRecordingManager.sync(this, () -> {
             Widgets.updateAll(this);
             StepService.refresh(this, true);

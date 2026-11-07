@@ -403,3 +403,16 @@ body.device .preview-only { display: none !important; }
 /* Calibration */
 .cal { flex-direction: column; align-items: center; gap: 6px; width: 100%; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .cal-row { display: flex; gap: 8px; }
+/* Calibrate & record card: rows fit the card width; [hidden] must win over display:flex */
+[hidden] { display: none !important; }
+#rec .cal-row { width: 100%; }
+#rec .cal-row > select, #rec .cal-row > input { flex: 1 1 auto; min-width: 0; }
+#rec .cal-row > button { flex: 0 0 auto; }
+/* No sideways scrolling anywhere: a scrolling view only scrolls vertically, rows wrap,
+   and long text (file names, debug lines) breaks instead of widening the page */
+.view { overflow-x: hidden; touch-action: pan-y; }
+.view > *, .card, .cal { max-width: 100%; min-width: 0; box-sizing: border-box; }
+.cal-row { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+.cal-row > * { min-width: 0; max-width: 100%; }
+.hint, .t-status, .t-result { overflow-wrap: anywhere; }
+body.typing .tabbar { display: none; }

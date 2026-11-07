@@ -5,12 +5,15 @@ each walk's sum with its count (no per-step labels needed). Still/noise sequence
 
   python -I train.py <data dir> cv [gyro]      leave-people-out cross-validation (3 folds by person)
   python -I train.py <data dir> final <out>    train on everyone, write weights for StepNet.java
+  python -I train.py <data dir> personal <lab dir> <out>
+      your Lab recordings (tools/real/lab2csv.py output): 2-fold test on your walks, model vs the
+      app's motion count. Writes <out> (trained on everything) only if the model is more accurate.
 """
 import csv, math, sys
 import numpy as np
 import torch, torch.nn as nn
 
-torch.set_num_threads(4)
+torch.set_num_threads(max(1, (__import__('os').cpu_count() or 4)))
 DT = 0.04
 H = 16
 
@@ -47,11 +50,13 @@ class Net(nn.Module):
 def load(d, use_gyro):
     walks = []
     for r in csv.DictReader(open(d + '/index.csv')):
+        if not r['steps'].isdigit(): continue
         a = np.loadtxt(f"{d}/{r['name']}.csv", delimiter=',', dtype=np.float64)
         t = a[:, 0] / 1e9
         f = features(a[:, 1:4], a[:, 4:7] if use_gyro else None)
         s0 = int(np.searchsorted(t, float(r['start_s']))); s1 = int(np.searchsorted(t, float(r['end_s'])))
-        walks.append(dict(uid=int(r['uid']), place=r['placement'], x=f, s0=s0, s1=s1, steps=int(r['steps']), name=r['name']))
+        walks.append(dict(uid=int(r['uid']), place=r['placement'], x=f, s0=s0, s1=s1, steps=int(r['steps']), name=r['name'],
+                          chip=r.get('chip') or '', app=r.get('app_motion') or ''))
     return walks
 
 def negatives(nin, rng, n=24):
@@ -84,6 +89,7 @@ def augment(w, rng):
     return x[lead:tail], w['s0'] - lead, w['s1'] - lead
 
 def train(walks, nin, epochs=150, seed=0):
+    epochs = int(__import__('os').environ.get('STRIDE_EPOCHS', epochs))   # smoke tests: STRIDE_EPOCHS=1
     torch.manual_seed(seed); rng = np.random.default_rng(seed)
     net = Net(nin)
     opt = torch.optim.Adam(net.parameters(), lr=3e-3)
@@ -140,6 +146,31 @@ if __name__ == '__main__':
             e = np.array([x[0] for x in v]); allv += list(np.abs(e))
             print(f"  {g:7s} n={len(e):3d}  mean |err| {np.abs(e).mean():4.1f}%  bias {e.mean():+5.1f}%  worst {np.abs(e).max():5.1f}%  extra/trace {np.mean([x[1] for x in v]):4.1f}")
         print(f"  ALL     n={len(allv)}  mean |err| {np.mean(allv):4.1f}%  ({'with' if gyro else 'no'} gyro)")
+    elif mode == 'personal':
+        lab = [w for w in load(sys.argv[3], gyro) if w['steps'] > 0]
+        if len(lab) < 4:
+            sys.exit(f"only {len(lab)} labelled walks with steps: record at least 4 first")
+        rows = []
+        for fold in range(2):
+            test = lab[fold::2]
+            train_set = walks + lab[1 - fold::2] * 3 + negatives(nin, rng)      # your walks count 3x
+            net = train(train_set, nin, epochs=100)
+            for w in test:
+                got, _ = count(net, w)
+                rows.append((w['name'], w['steps'], got, w['app'], w['chip']))
+        def mae(i):
+            v = [abs(float(r[i]) - r[1]) / r[1] for r in rows if r[i] != '']
+            return 100 * sum(v) / len(v) if v else float('nan')
+        print(f"{'recording':44s} truth  model   app motion  chip")
+        for r in rows: print(f"{r[0][:44]:44s} {r[1]:5d} {r[2]:6.0f} {r[3]:>11} {r[4]:>5}")
+        m, a, c = mae(2), mae(3), mae(4)
+        print(f"mean |err| on your walks (each scored by a model that didn't train on it): model {m:.1f}%, app motion {a:.1f}%, chip {c:.1f}%")
+        if m + 1 < a:
+            net = train(walks + lab * 3 + negatives(nin, rng), nin, epochs=100)
+            save(net, sys.argv[4])
+            print("MODEL BETTER: new weights written. Export them and consider turning on StepEngine.HAND_MOTION_NET.")
+        else:
+            print("Model not better than the app's motion count: weights unchanged.")
     elif mode == 'folds':                 # one model per fold, for the Java harness: <out>.fold0.txt ...
         for fold in range(3):
             net = train([w for w in walks if w['uid'] % 3 != fold] + negatives(nin, rng), nin)

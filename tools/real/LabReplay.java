@@ -10,7 +10,7 @@ import java.util.TreeMap;
 
 /**
  * Lab-mode recordings through the app's own code, one row per recording, signed errors.
- * Accel is thinned to 25 Hz like the app; the whole recording is one bout.
+ * Accel is thinned to 25 a second like the app (by time: phones deliver faster than asked); the whole recording is one bout.
  *   chip       - step-counter delta (what the chip alone gives)
  *   peaks      - MotionCounter peaks;  hand = peaks + rhythm (StepFusion.handEstimate)
  *   model      - StepNet while walking (Lab-mode only, not used for counting)
@@ -30,7 +30,8 @@ public class LabReplay {
             List<String> lines = Files.readAllLines(Path.of(f));
             Map<String, String> head = new TreeMap<>();
             for (String kv : lines.get(0).replace("#", "").trim().split(" ")) { String[] p = kv.split("="); if (p.length == 2) head.put(p[0], p[1]); }
-            int truth = Integer.parseInt(head.get("truth"));
+            String tv = head.getOrDefault("truth", "unknown");
+            int truth = tv.matches("\\d+") ? Integer.parseInt(tv) : -1;      // -1: cut off before a count was entered
             List<long[]> vehicle = new ArrayList<>();          // {ns, entered}
             for (String l : lines) { String[] r = l.split(","); if (r.length > 2 && r[1].equals("V")) vehicle.add(new long[]{Long.parseLong(r[0]), (long) Float.parseFloat(r[2])}); }
             vehicle.sort((x, y) -> Long.compare(x[0], y[0]));
@@ -48,6 +49,7 @@ public class LabReplay {
     }
 
     static String err(double got, int truth) {
+        if (truth < 0) return "no count";
         return truth == 0 ? String.format(Locale.ROOT, "%+.0f fake", got) : String.format(Locale.ROOT, "%+5.1f%%", 100 * (got - truth) / truth);
     }
 
@@ -65,7 +67,7 @@ public class LabReplay {
         };
         long first = -1, lastCounter = -1, peaks = 0, rhythm = 0, t = 0, lastTick = 0;
         double model = 0;
-        int accelN = 0;
+        long lastAccel = 0;
         for (String l : lines) {
             if (l.startsWith("#")) continue;
             String[] r = l.split(",");
@@ -73,7 +75,8 @@ public class LabReplay {
             if (first < 0) { first = t; fusion.start(t); }
             switch (r[1]) {
                 case "A": {
-                    if ((accelN++ & 1) != 0) break;              // 50 Hz -> 25 Hz
+                    if (t - lastAccel < 38_000_000L && t > lastAccel) break;   // 25 a second, like the app
+                    lastAccel = t;
                     float x = Float.parseFloat(r[2]), y = Float.parseFloat(r[3]), z = Float.parseFloat(r[4]);
                     long rb = mc.rhythmSteps;
                     int n = mc.onSample(x, y, z, t);

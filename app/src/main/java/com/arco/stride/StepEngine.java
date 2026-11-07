@@ -29,7 +29,11 @@ import java.util.TreeMap;
  *   accel     - our motion detector, always on (last resort, only on phones with no step sensor).
  *
  * Max accuracy (Settings, on by default): the accelerometer stays off until a step wakes us
- * (wake-up step detector, or significant motion). It then runs at 25 Hz for the walking bout,
+ * (wake-up step detector, or significant motion). It then runs at 25 Hz for the walking bout.
+ * Battery: on phones with a wake-up step detector and an accelerometer buffer of 12 s or more
+ * ("paced" mode), the CPU sleeps during walks: the accelerometer fills its buffer and the step
+ * detector wakes us about every 10 s to read it. Otherwise a wake lock is held while walking.
+ * An alarm (not a timer, which stops while the phone sleeps) closes the bout after you stop.
  * with the proximity sensor (where is the phone?). StepFusion picks chip or motion by position,
  * and takes chip steps back when Activity Recognition says it was a vehicle. Motion = MotionCounter
  * peaks, plus its rhythm count for a steady hand (or StepNet, see HAND_MOTION_NET). Off 60 s after the last step.
@@ -95,6 +99,7 @@ final class StepEngine {
     /** The background service is needed for the phone-sensor sources, or for Max accuracy. */
     static boolean needsService(Context c) {
         if (!StepService.hasPermission(c)) return false;
+        if (LabRecorder.running()) return true;           // a recording needs the foreground service
         String s = source(c);
         if (s.equals("none")) return false;
         return !s.equals("recording") || StepStore.boost(c);
@@ -123,10 +128,7 @@ final class StepEngine {
     /** Step-counter steps since the app was opened (for the 100-step test), or -1. */
     static long liveCounter() { return live == null ? -1 : live.counterSteps(); }
 
-    static void startCalibration() { if (live != null) live.startCalibration(); }
 
-    /** Returns {motion steps, median peak height} for the calibration walk. */
-    static float[] stopCalibration() { return live == null ? new float[]{0, 0} : live.stopCalibration(); }
 
     static long wallMs(long sensorNs) {
         return System.currentTimeMillis() - (SystemClock.elapsedRealtimeNanos() - sensorNs) / 1_000_000L;
@@ -142,15 +144,19 @@ final class StepEngine {
         private final String source;
         private final boolean boost;
         private final MotionCounter pedo = new MotionCounter();
-        private final StepNet net = StepNet.standard();
+        private final StepNet net = HAND_MOTION_NET ? StepNet.standard() : null;   // not run unless it counts
         private final Placement place = new Placement();
         private final StepFusion fusion = new StepFusion();
         private final Sensor proximity;
         private int periodN;
         private final Handler main = new Handler(Looper.getMainLooper());
         private PowerManager.WakeLock wake;
+        private final boolean paced;
+        private final int pacedLatencyUs;
+        private long alarmAt;
+        private final android.app.AlarmManager.OnAlarmListener boutAlarm = () -> { alarmAt = 0; tick(SystemClock.elapsedRealtimeNanos()); };
         private boolean accelOn, detectorForChip;
-        private long lastRaw = -1, lastTickNs, lastWidget;
+        private long lastRaw = -1, lastTickNs, lastWidget, lastAccelNs;
 
         Background(Context c) {
             app = c.getApplicationContext();
@@ -167,6 +173,9 @@ final class StepEngine {
             proximity = sm.getDefaultSensor(Sensor.TYPE_PROXIMITY);
             source = source(app);
             boost = StepStore.boost(app) && !source.equals("accel") && accel != null;
+            int reserved = accel == null ? 0 : accel.getFifoReservedEventCount();
+            paced = wakeDetector != null && wakeAccel == null && reserved * 40_000L >= 12_000_000L;
+            pacedLatencyUs = (int) Math.min(10_000_000L, reserved * 40_000L * 8 / 10);
             SharedPreferences p = StepStore.prefs(app);
             fusion.gain = p.getFloat("calGain", 1f);
             learned(p);
@@ -198,8 +207,22 @@ final class StepEngine {
             sm.unregisterListener(this);
             if (sigMotion != null) sm.cancelTriggerSensor(this, sigMotion);
             main.removeCallbacksAndMessages(null);
+            cancelAlarm();
             releaseWake();
             accelOn = false;
+        }
+
+        /** Wake us at `inMs` from now to check the bout, even if the phone is asleep. */
+        private void alarm(long inMs) {
+            long at = SystemClock.elapsedRealtime() + inMs;
+            alarmAt = at;
+            app.getSystemService(android.app.AlarmManager.class).setWindow(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    at, 5_000, "stride:bout", boutAlarm, main);
+        }
+
+        private void cancelAlarm() {
+            app.getSystemService(android.app.AlarmManager.class).cancel(boutAlarm);
+            alarmAt = 0;
         }
 
         // ----- sensors -----
@@ -220,7 +243,7 @@ final class StepEngine {
         }
 
         private void disarmTrigger() {
-            if (wakeDetector != null) sm.unregisterListener(this, wakeDetector);
+            if (wakeDetector != null && !paced) sm.unregisterListener(this, wakeDetector);
         }
 
         private void startAccel() {
@@ -230,13 +253,19 @@ final class StepEngine {
             // deliver in batches of up to 10 s, but before the sensor's buffer would overflow
             int latencyUs = fifo > 0 ? (int) Math.min(10_000_000L, fifo * 40_000L * 8 / 10) : 0;
             pedo.reset();
-            net.reset();
+            if (net != null) net.reset();
+            if (paced) {
+                // CPU sleeps: the accelerometer buffers, the wake-up step detector wakes us every ~10 s to read it
+                latencyUs = pacedLatencyUs;
+                sm.unregisterListener(this, wakeDetector);
+                sm.registerListener(this, wakeDetector, SensorManager.SENSOR_DELAY_NORMAL, pacedLatencyUs);
+            }
             sm.registerListener(this, a, 40_000, latencyUs);          // 25 samples a second
             // where is the phone: proximity reports only on change, so it costs almost nothing
             if (!source.equals("accel") && proximity != null) sm.registerListener(this, proximity, SensorManager.SENSOR_DELAY_NORMAL);
             // A normal (non-wake-up) sensor loses its data while the phone sleeps, and with no buffer
             // nothing can be batched: only then keep the CPU awake, and only while walking.
-            if (a == accel || fifo == 0) holdWake();
+            if (!paced && (a == accel || fifo == 0)) holdWake();
             accelOn = true;
         }
 
@@ -246,6 +275,11 @@ final class StepEngine {
             if (proximity != null) sm.unregisterListener(this, proximity);
             releaseWake();
             accelOn = false;
+            if (paced && boost) {
+                // back to waking at the very first step (the bout may resume during the grace period)
+                sm.unregisterListener(this, wakeDetector);
+                sm.registerListener(this, wakeDetector, SensorManager.SENSOR_DELAY_NORMAL);
+            }
         }
 
         private void holdWake() {
@@ -290,9 +324,12 @@ final class StepEngine {
                     if (!fusion.active() || fusion.stopped()) startBout(ts);
                 }
             } else if (type == Sensor.TYPE_ACCELEROMETER) {
+                // phones often deliver faster than asked (73 Hz seen for 25 requested): use 25 a second
+                if (ts - lastAccelNs < 38_000_000L && ts > lastAccelNs) return;
+                lastAccelNs = ts;
                 long r0 = pedo.rhythmSteps;
                 int peaks = pedo.onSample(e.values[0], e.values[1], e.values[2], ts);
-                int model = net.onSample(e.values[0], e.values[1], e.values[2], 0, ts);
+                int model = net == null ? 0 : net.onSample(e.values[0], e.values[1], e.values[2], 0, ts);
                 if (source.equals("accel")) {
                     if (peaks > 0) stored("accel", ts, peaks);
                     return;
@@ -330,28 +367,24 @@ final class StepEngine {
                 detectorForChip = counter == null && detector != null;
                 if (detectorForChip && !source.equals("detector")) sm.registerListener(this, detector, SensorManager.SENSOR_DELAY_NORMAL);
             }
-            main.removeCallbacks(graceCheck);
             if (!accelOn) startAccel();
+            if (alarmAt == 0) alarm(StepFusion.STOP_NS / 1_000_000L + 10_000);
         }
 
         /** A chip step after we stopped means walking again. */
         private void resumeIfWalking() {
-            if (fusion.active() && !fusion.stopped() && !accelOn) {
-                main.removeCallbacks(graceCheck);
-                startAccel();
-            }
+            if (fusion.active() && !fusion.stopped() && !accelOn) startAccel();
         }
-
-        private final Runnable graceCheck = () -> tick(SystemClock.elapsedRealtimeNanos());
 
         private void tick(long ts) {
             int state = fusion.tick(ts);
             if (state == StepFusion.WALKING) {
                 if (wake != null && wake.isHeld()) wake.acquire(5 * 60_000L);
+                // keep a check ~70 s ahead (catches the stop when nothing else wakes us); renewed every ~20 s, not every tick
+                if (alarmAt - SystemClock.elapsedRealtime() < 50_000) alarm(StepFusion.STOP_NS / 1_000_000L + 10_000);
             } else if (state == StepFusion.STOPPED) {
                 if (accelOn) stopAccel();
-                main.removeCallbacks(graceCheck);
-                main.postDelayed(graceCheck, 5_000);
+                alarm(5_000);
             } else if (state == StepFusion.CLOSED) {
                 closeBout();
             }
@@ -359,7 +392,7 @@ final class StepEngine {
 
         private void closeBout() {
             stopAccel();
-            main.removeCallbacks(graceCheck);
+            cancelAlarm();
             long[] r = applyBout(repo, fusion, ns -> wallMs(ns), ZoneId.systemDefault(), System.currentTimeMillis());
             long added = r[0], removed = r[1];
             SharedPreferences p = StepStore.prefs(app);
@@ -413,12 +446,10 @@ final class StepEngine {
         private final SensorManager sm;
         private final Listener listener;
         private final Handler main = new Handler(Looper.getMainLooper());
-        private final Sensor counter, detector, accel;
+        private final Sensor counter, detector;
         private String date;
         private long base, firstRaw = -1, counterSteps, detectorSteps, shown = -1, lastPush, lastWidget;
         private boolean pushPending;
-        private MotionCounter cal;
-        private int calSteps;
 
         Live(Context c, Listener l) {
             app = c.getApplicationContext();
@@ -426,7 +457,6 @@ final class StepEngine {
             listener = l;
             counter = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
             detector = sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR);
-            accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             date = LocalDate.now().toString();
             base = StepRepository.get(app).day(date);
             lastWidget = SystemClock.uptimeMillis();
@@ -459,21 +489,6 @@ final class StepEngine {
             StepStore.prefs(app).edit().putString("liveDate", date).putLong("liveSteps", keep).apply();
         }
 
-        void startCalibration() {
-            if (accel == null) return;
-            cal = new MotionCounter();
-            cal.floor = 0.08f;          // listen for weaker steps than usual; the walk tells us where to set it
-            calSteps = 0;
-            sm.registerListener(this, accel, 40_000);
-        }
-
-        float[] stopCalibration() {
-            if (accel != null) sm.unregisterListener(this, accel);
-            float[] r = {calSteps, cal == null ? 0 : cal.medianPeak()};
-            cal = null;
-            return r;
-        }
-
         @Override public void onSensorChanged(SensorEvent e) {
             int type = e.sensor.getType();
             if (type == Sensor.TYPE_STEP_COUNTER) {
@@ -482,9 +497,6 @@ final class StepEngine {
                 counterSteps = raw - firstRaw;
             } else if (type == Sensor.TYPE_STEP_DETECTOR) {
                 detectorSteps++;
-            } else if (type == Sensor.TYPE_ACCELEROMETER && cal != null) {
-                calSteps += cal.onSample(e.values[0], e.values[1], e.values[2], e.timestamp);
-                return;
             }
             if (pushPending) return;
             pushPending = true;

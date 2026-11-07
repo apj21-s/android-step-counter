@@ -7,10 +7,12 @@ out = sys.argv[1]; os.makedirs(out, exist_ok=True)
 idx = os.path.join(out, 'index.csv')
 new = not os.path.exists(idx)
 with open(idx, 'a') as fo:
-    if new: fo.write('name,uid,exp,placement,steps,start_s,end_s,raw_hz,has_gyro\n')
+    if new: fo.write('name,uid,exp,placement,steps,start_s,end_s,raw_hz,has_gyro,chip,app_motion\n')
     for path in sys.argv[2:]:
         head = open(path).readline()
         m = dict(re.findall(r'(\w+)=(\S+)', head))
+        if not m.get('truth', '').isdigit():
+            print(f"{os.path.basename(path)}: skipped (no hand count: recording was cut off)"); continue
         rows = [l.split(',') for l in open(path) if not l.startswith('#')]
         A = np.array([[float(r[0]), *map(float, r[2:5])] for r in rows if r[1] == 'A'])
         G = np.array([[float(r[0]), *map(float, r[2:5])] for r in rows if r[1] == 'G']) if any(r[1] == 'G' for r in rows) else np.zeros((0, 4))
@@ -26,5 +28,7 @@ with open(idx, 'a') as fo:
         np.savetxt(os.path.join(out, name + '.csv'), np.column_stack([np.round(t * 1e9), acc, gyr]), fmt='%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f')
         place = {'hand': 'Hand_held', 'typing': 'Handheld_using', 'pocket_front': 'Trousers_front_pocket',
                  'pocket_back': 'Trousers_back_pocket', 'bag': 'Backpack'}.get(m.get('place'), m.get('place', 'unknown'))
-        fo.write(f"{name},900,lab,{place},{int(m['truth'])},0.000,{t[-1]:.3f},{len(A) / ta[-1]:.1f},{int(len(G) > 0)}\n")
+        # the phone's own counts from the header: chip, and the motion estimate the app uses for this position
+        motion = m.get('hand') if m.get('place') in ('hand', 'typing') and 'hand' in m else m.get('peaks', '')
+        fo.write(f"{name},900,lab,{place},{int(m['truth'])},0.000,{t[-1]:.3f},{len(A) / ta[-1]:.1f},{int(len(G) > 0)},{m.get('chip', '')},{motion}\n")
         print(f"{name}: truth {m['truth']} chip {m.get('chip')} ({place}, {t[-1]:.0f} s)")

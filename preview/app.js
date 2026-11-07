@@ -576,43 +576,72 @@
       stepTo(st.steps);
       renderHours();
     };
-    $('#learnReset').addEventListener('click', () => {
-      if (!confirm('Forget calibration and what Stride learned from your walks?')) return;
-      A.learnReset(); $('#calMsg').textContent = 'Back to the default settings.';
+    // Calibrate & record. No prompt()/confirm(): Android's WebView ignores them without extra code.
+    const mmss = n => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+    const showList = () => {
+      const l = JSON.parse(A.recList());
+      $('#recList').textContent = l.length ? `Saved in Download/Stride lab: ${l.length} · latest ${l[0].name} (${l[0].kb} KB)` : '';
+    };
+    let recTimer = 0;
+    const recUi = () => {
+      const st = JSON.parse(A.recStatus());
+      const counting = !$('#recCountRow').hidden;
+      $('#recBtn').textContent = st.on ? 'Stop' : 'Start';
+      $('#recBtn').hidden = counting;
+      $('#recPlace').disabled = st.on;
+      if (st.on && !counting) $('#recMsg').textContent = `Recording ${mmss(st.seconds)} · chip ${st.chip} · motion ${st.peaks}`;
+      clearTimeout(recTimer);
+      if (st.on) recTimer = setTimeout(recUi, 1000);
+    };
+    $('#recBtn').addEventListener('click', () => {
+      const st = JSON.parse(A.recStatus());
+      if (!st.on) {
+        const err = A.recStart($('#recPlace').value);
+        $('#recMsg').textContent = err || 'Recording. Walk and count your steps.';
+      } else if ($('#recPlace').value === 'car') {
+        finish(0);
+      } else {
+        $('#recCountRow').hidden = false;            // keeps recording until the count is saved
+        $('#recMsg').textContent = 'How many steps did you count?';
+        $('#recCount').focus();
+        setTimeout(() => $('#recCount').scrollIntoView({block: 'center', behavior: 'smooth'}), 350);   // after the keyboard opens
+      }
+      recUi();
     });
-        // Lab mode: hold "Accuracy check" for a second to show it
-    let labHold = 0;
-    $('#testTitle').addEventListener('pointerdown', () => { labHold = setTimeout(() => { $('#lab').hidden = false; A.vibrate(30); }, 900); });
-    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('#testTitle').addEventListener(ev, () => clearTimeout(labHold));
-    let labOn = false;
-    $('#labBtn').addEventListener('click', () => {
-      if (!labOn) {
-        labOn = true; A.labStart($('#labPlace').value); $('#labBtn').textContent = 'Stop';
-        $('#labMsg').textContent = 'Recording. Walk and count your steps, then tap Stop.';
+    const finish = t => {
+      const place = $('#recPlace').value;
+      const r = JSON.parse(A.recStop(t, true));
+      $('#recCountRow').hidden = true; $('#recCount').value = '';
+      $('#recMsg').textContent = r.error ? 'Not saved: ' + r.error
+        : `You ${t} · chip ${r.chip} · motion ${place.startsWith('hand') || place === 'typing' ? r.hand : r.peaks}`
+          + (r.calibrated ? ' · calibrated' : '') + ` · saved ${r.file}`;
+      showList(); recUi();
+    };
+    $('#recSave').addEventListener('click', () => {
+      const t = parseInt($('#recCount').value, 10);
+      if (t > 0) finish(t); else $('#recMsg').textContent = 'Type the number of steps you counted.';
+    });
+    $('#recCount').addEventListener('keydown', e => { if (e.key === 'Enter') $('#recSave').click(); });
+    $('#recCount').addEventListener('focus', () => {
+      document.body.classList.add('typing');          // the tab bar would sit on top of the card
+      setTimeout(() => $('#recCount').scrollIntoView({block: 'center'}), 350);
+    });
+    $('#recCount').addEventListener('blur', () => document.body.classList.remove('typing'));
+    $('#recCancel').addEventListener('click', () => {
+      A.recCancel(); $('#recCountRow').hidden = true; $('#recMsg').textContent = 'Discarded.'; recUi();
+    });
+    let resetArmed = 0;
+    $('#learnReset').addEventListener('click', () => {
+      if (!resetArmed) {
+        $('#learnReset').textContent = 'Tap again to reset';
+        resetArmed = setTimeout(() => { resetArmed = 0; $('#learnReset').textContent = 'Reset what Stride learned'; }, 4000);
         return;
       }
-      const car = $('#labPlace').value === 'car';
-      const t = car ? 0 : parseInt(prompt('How many steps did you count?') || '', 10);
-      if (!car && !(t > 0)) return;            // keep recording until a count is entered
-      labOn = false; $('#labBtn').textContent = 'Start';
-      const r = JSON.parse(A.labStop(t));
-      $('#labMsg').textContent = r.error ? 'Not saved: ' + r.error
-        : `You ${t} · chip ${r.chip} · peaks ${r.peaks} · model ${r.modelWalking} · saved ${r.file}`;
+      clearTimeout(resetArmed); resetArmed = 0; $('#learnReset').textContent = 'Reset what Stride learned';
+      A.learnReset(); $('#recMsg').textContent = 'Back to the default settings.';
     });
-        // Calibration walks
-    let calPlace = null;
-    for (const [id, place, label] of [['#calHand', 'hand', 'In hand'], ['#calPocket', 'pocket', 'In pocket']]) {
-      $(id).addEventListener('click', () => {
-        if (!calPlace) {
-          calPlace = place; A.calStart(); $(id).textContent = 'Done';
-          $('#calMsg').textContent = `Walk exactly 100 steps with the phone ${place === 'hand' ? 'in your hand' : 'in a pocket'}, then tap Done.`;
-        } else if (calPlace === place) {
-          const n = A.calStop(place); calPlace = null; $(id).textContent = label;
-          $('#calMsg').textContent = n >= 50 ? `Motion detector counted ${n} of 100 · saved for ${place === 'hand' ? 'hand' : 'pocket'}.`
-            : `It counted only ${n}. Try again walking at a steady pace.`;
-        }
-      });
-    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { recUi(); showList(); } });
+    recUi(); showList();
   }
 
   // Count up one step at a time instead of jumping in batches.
