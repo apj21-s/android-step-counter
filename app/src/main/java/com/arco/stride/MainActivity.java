@@ -132,6 +132,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface public String state() { return StepStore.stateJson(MainActivity.this); }
         @JavascriptInterface public void setGoal(int g) { edit().putInt("goal", Math.max(500, Math.min(100000, g))).apply(); changed(); }
         @JavascriptInterface public void setHeight(int h) { edit().putInt("height", Math.max(100, Math.min(250, h))).apply(); changed(); }
+        @JavascriptInterface public void setWalkLog(boolean on) { edit().putBoolean("walkLog", on).apply(); }
         @JavascriptInterface public void setHaptics(boolean on) { edit().putBoolean("haptics", on).apply(); }
         @JavascriptInterface public void setWidgetStyle(String s) { edit().putString("wstyle", s).apply(); changed(); }
 
@@ -194,7 +195,15 @@ public class MainActivity extends Activity {
                 if (calibrate && hand && truth >= 50 && est > 0 && !o.has("error")) {
                     float gain = Math.max(0.8f, Math.min(1.25f, truth / (float) est));
                     float floor = Math.max(0.05f, Math.min(0.15f, 0.4f * (float) o.optDouble("medianPeak", 0.3)));
-                    edit().putFloat("calGain", gain).putFloat("calFloor", floor).apply();
+                    SharedPreferences.Editor ed = edit().putFloat("calGain", gain).putFloat("calFloor", floor);
+                    long chip = o.optLong("chip");
+                    if (chip > 0) {
+                        // how many steps this phone's chip misses in a steady hand: sets how much motion may top it up
+                        float miss = Math.max(0f, Math.min(1f, truth / (float) chip - 1f));
+                        ed.putFloat("calChipMiss", miss);
+                        o.put("chipMiss", miss);
+                    }
+                    ed.apply();
                     o.put("calibrated", true).put("gain", gain);
                     runOnUiThread(() -> {                                      // restart so the new values apply
                         StepService.stop(MainActivity.this);
@@ -218,7 +227,7 @@ public class MainActivity extends Activity {
         }
 
         private void calReset() {
-            edit().remove("calGain").remove("calFloor").remove("gain_hand").remove("gain_pocket")
+            edit().remove("calGain").remove("calFloor").remove("calChipMiss").remove("gain_hand").remove("gain_pocket")
                     .remove("floor_hand").remove("floor_pocket").apply();
         }
 

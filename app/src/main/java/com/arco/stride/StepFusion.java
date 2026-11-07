@@ -36,6 +36,13 @@ final class StepFusion {
     private long lastStepNs, lastChipNs, lastCounterNs, stopNs;
 
     float gain = 1f;                        // from calibration: motion steps × gain
+    /**
+     * Most motion may add over the chip in one bout, as a share of the chip's count. 5% by default:
+     * on a real phone (Moto Edge 60 Pro) the chip got 122/122 and 108/111 in hand, and motion added
+     * 634 steps (+6%) over a day of mostly non-walking hand movement. A calibration walk raises it
+     * to what that phone's chip actually misses + 2%.
+     */
+    float maxTopUp = 0.05f;
     /** Activity Recognition's answer for a moment (sensor clock ns); null when it isn't available. */
     java.util.function.LongPredicate vehicleAt;
 
@@ -44,7 +51,8 @@ final class StepFusion {
 
     // result of the last closed bout
     long chipSteps, motionSteps;
-    boolean usedMotion, vehicle, agreed;
+    boolean usedMotion, vehicle, agreed, capped;
+    long storedMotion;                      // what motion put in the bout after the cap (0 if not used)
     int place;
     final TreeMap<Long, Long> motionBySecond = new TreeMap<>();   // filled only when motion won
     final TreeMap<Long, Long> chipBySecond = new TreeMap<>();     // filled only in a vehicle: steps to take back
@@ -177,15 +185,20 @@ final class StepFusion {
         motionSteps = motion;
         boolean arKnown = vehicleAt != null;
         agreed = chip > 20 && Math.abs(motion - chip) <= 0.05 * chip;
+        // the cap: motion can only top up the chip by maxTopUp (and adds nothing when the chip saw nothing)
+        long capped_ = Math.min(motion, (long) Math.floor(chip * (1.0 + maxTopUp) + 1e-4));   // 1.05f is 1.0499999...
+        capped = capped_ < motion;
         if (place == Placement.HAND) {
-            usedMotion = motion > chip && !doubled && (arKnown || chipSees);
+            usedMotion = capped_ > chip && !doubled && (arKnown || chipSees);
         } else if (place == Placement.UNKNOWN) {
-            usedMotion = motion > chip && chipSees && !doubled;
+            usedMotion = capped_ > chip && chipSees && !doubled;
         } else {
             usedMotion = false;                     // covered, upright, swinging: the chip is better there
         }
 
 
+        storedMotion = usedMotion ? capped_ : 0;
+        if (usedMotion) motion = capped_;
         motionBySecond.clear();
         if (usedMotion) {
             // spread the bout's motion count over the seconds it happened, in proportion to the channel used
@@ -193,12 +206,17 @@ final class StepFusion {
             long chTotal = useRhythm ? rhythmRaw : motionRaw;
             double per = chTotal == 0 ? 0 : motion / (double) chTotal;
             double carry = 0;
+            long given = 0, lastSec = -1;
             for (Map.Entry<Long, long[]> e : secs.entrySet()) {
                 if (e.getValue()[ch] == 0) continue;
+                lastSec = e.getKey();
                 carry += e.getValue()[ch] * per;
                 long whole = Math.round(carry);
-                if (whole > 0) { motionBySecond.put(e.getKey(), whole); carry -= whole; }
+                if (whole > 0) { motionBySecond.put(e.getKey(), whole); carry -= whole; given += whole; }
             }
+            // rounding can leave a step over (or one too many): settle it on the last second so the sum is exact
+            if (lastSec >= 0 && given != motion) motionBySecond.merge(lastSec, motion - given, Long::sum);
+            motionBySecond.values().removeIf(v -> v <= 0);
         }
         active = false;
         stopped = false;

@@ -40,7 +40,11 @@ public class StepFusionTest {
     @Test public void steadyHandTrustsMotionWhenHigher() {
         StepFusion f = bout(Placement.HAND, false, true, 1, 2);
         assertTrue(f.usedMotion);
-        assertEquals(200, f.motionBySecond.values().stream().mapToLong(Long::longValue).sum());
+        // motion said 200, chip 100: the cap lets motion add at most 5% -> 105
+        assertEquals(200, f.motionSteps);
+        assertEquals(105, f.storedMotion);
+        assertTrue(f.capped);
+        assertEquals(105, f.motionBySecond.values().stream().mapToLong(Long::longValue).sum());
         f = bout(Placement.HAND, false, true, 2, 1);         // chip higher: keep the chip
         assertFalse(f.usedMotion);
     }
@@ -94,7 +98,35 @@ public class StepFusionTest {
         while (f.active()) { t += S; f.tick(t); }
         assertTrue(f.usedMotion);
         assertEquals(200, f.motionSteps);
-        assertEquals(200, f.motionBySecond.values().stream().mapToLong(Long::longValue).sum());
+        assertEquals(105, f.motionBySecond.values().stream().mapToLong(Long::longValue).sum());   // capped at chip + 5%
+    }
+
+    @Test public void topUpCapFollowsCalibration() {
+        StepFusion f = new StepFusion();
+        f.vehicleAt = ns -> false;
+        f.maxTopUp = 0.20f;                                    // a phone whose chip missed 18% on its calibration walk
+        long t = 1000 * S;
+        f.start(t);
+        for (int i = 0; i < 100; i++) { t += S; f.motion(2, t); f.chip(1, t); f.vote(Placement.HAND, t); f.tick(t); }
+        while (f.active()) { t += S; f.tick(t); }
+        assertEquals(120, f.storedMotion);
+        // small real corrections pass untouched: chip 100, motion 103 (under the 5% default)
+        f = new StepFusion();
+        f.vehicleAt = ns -> false;
+        t = 5000 * S;
+        f.start(t);
+        for (int i = 0; i < 100; i++) { t += S; f.motion(i < 3 ? 2 : 1, t); f.chip(1, t); f.vote(Placement.HAND, t); f.tick(t); }
+        while (f.active()) { t += S; f.tick(t); }
+        assertTrue(f.usedMotion);
+        assertEquals(103, f.storedMotion);
+        assertFalse(f.capped);
+    }
+
+    @Test public void noChipStepsMeansNoMotionSteps() {
+        // phone bumping on a table: motion "steps" but the chip saw none
+        StepFusion f = bout(Placement.HAND, false, true, 0, 1);
+        assertFalse(f.usedMotion);
+        assertEquals(0, f.storedMotion);
     }
 
     @Test public void vehicleTakesTheChipStepsBack() {

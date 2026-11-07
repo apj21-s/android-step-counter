@@ -30,7 +30,7 @@
     return out;
   }
   function loadDevice(st) {
-    Object.assign(S, { goal: st.goal, height: st.height, amoled: st.amoled, haptics: st.haptics, boost: st.boost, share: st.share, hours: st.hours, steps: st.steps });
+    Object.assign(S, { goal: st.goal, height: st.height, amoled: st.amoled, haptics: st.haptics, boost: st.boost, share: st.share, walklog: st.walklog, hours: st.hours, steps: st.steps });
     S.day = parseDay(st.today);
     S.history = loadHistory(st);
   }
@@ -399,6 +399,7 @@
     if (DEVICE && key === 'haptics') A.setHaptics(on);
     if (DEVICE && key === 'boost') A.setBoost(on);
     if (DEVICE && key === 'share') A.setShare(on);
+    if (DEVICE && key === 'walklog') A.setWalkLog(on);
   }
   $$('.switch').forEach(sw => sw.addEventListener('click', () => setSwitch(sw.dataset.key, sw.getAttribute('aria-checked') !== 'true')));
 
@@ -559,7 +560,7 @@
     goalRange.value = S.goal; $('#goalVal').textContent = fmt(S.goal); fillRange(goalRange);
     $('#heightVal').textContent = S.height + ' cm';
     $('#strideHint').textContent = `Stride ${Math.round(S.height * 0.415)} cm`;
-    for (const k of ['amoled', 'haptics', 'boost', 'share']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
+    for (const k of ['amoled', 'haptics', 'boost', 'share', 'walklog']) $$(`.switch[data-key=${k}]`).forEach(sw => sw.setAttribute('aria-checked', String(S[k])));
     app.classList.toggle('amoled', S.amoled); setSeg('theme', S.amoled ? 'amoled' : 'obsidian');
     setSeg('wstyle', DS.wstyle);
     $('#noticeBtn').addEventListener('click', () => A.requestPermission());

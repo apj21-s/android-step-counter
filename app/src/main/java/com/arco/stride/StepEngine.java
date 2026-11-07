@@ -189,6 +189,8 @@ final class StepEngine {
          */
         private void learned(SharedPreferences p) {
             float handPeak = p.getFloat("userHandPeak", 0);
+            // how much motion may top up the chip: what this phone's chip missed on a calibration walk + 2%, at least 5%
+            fusion.maxTopUp = p.contains("calChipMiss") ? Math.max(0.05f, p.getFloat("calChipMiss", 0) + 0.02f) : 0.05f;
             if (p.contains("calFloor")) pedo.floor = p.getFloat("calFloor", 0.12f);
             else if (handPeak > 0) pedo.floor = Math.max(0.05f, Math.min(0.12f, 0.3f * handPeak));
             else pedo.floor = 0.12f;
@@ -379,6 +381,7 @@ final class StepEngine {
             boolean resuming = fusion.active();
             fusion.start(ts);
             if (!resuming) {
+                boutStartNs = ts;
                 fusion.vehicleAt = Vehicle.available(app) ? ns -> Vehicle.at(app, ns) : null;
                 place.resetVotes();
                 periodN = 0;
@@ -412,11 +415,18 @@ final class StepEngine {
             }
         }
 
+        private long boutStartNs;
+
+        private long boutSecs() { return boutStartNs == 0 ? 0 : (SystemClock.elapsedRealtimeNanos() - boutStartNs) / 1_000_000_000L; }
+
         private void closeBout() {
             stopAccel();
             cancelAlarm();
             long[] r = applyBout(repo, fusion, ns -> wallMs(ns), ZoneId.systemDefault(), System.currentTimeMillis());
             long added = r[0], removed = r[1];
+            BoutLog.append(app, String.format(java.util.Locale.ROOT, "%1$tF %1$tT,%2$d,%3$s,%4$d,%5$d,%6$d,%7$.0f,%8$d,%9$.3f",
+                    System.currentTimeMillis(), boutSecs(), Placement.NAMES[fusion.place], fusion.chipSteps, fusion.motionSteps,
+                    fusion.storedMotion, fusion.maxTopUp * 100, removed, fusion.gain));
             SharedPreferences p = StepStore.prefs(app);
             float mp = pedo.medianPeak();
             if (fusion.agreed && periodN >= 10 && fusion.place == Placement.HAND && mp >= HAND_PEAK_MIN && mp <= HAND_PEAK_MAX) {

@@ -87,7 +87,8 @@ public class BoutStorageTest {
         walkThenCar(Placement.HAND, 1, 2, 60);                     // walk: chip 50, motion 100
         assertTrue(walkUsedMotion);
         assertEquals(100, walkMotionSteps);                        // the car's motion steps never counted
-        // stored: chip source 90 - 40 = 50, boost 100 -> 100 (subtracting from the boost would give 60)
-        assertEquals(100, repo.day("2026-11-05"));
+        // stored: chip source 90 - 40 = 50; boost = motion capped at chip + 5% = 52 -> 52
+        // (before the cap: 100; subtracting the car steps from the boost would have given 12)
+        assertEquals(52, repo.day("2026-11-05"));
     }
 }

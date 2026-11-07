@@ -19,10 +19,11 @@ done
 mkdir -p "$RAW"
 new=0
 for f in $("$ADB" shell 'ls "/sdcard/Download/Stride lab/" 2>/dev/null' | tr -d '\r'); do
-  [ -f "$RAW/$f" ] && continue
+  [ -f "$RAW/$f" ] && [ "$f" != bouts.txt ] && continue      # bouts.txt grows: always fetch it
   "$ADB" pull "/sdcard/Download/Stride lab/$f" "$RAW/" >/dev/null && new=$((new + 1))
 done
 n=$(ls "$RAW"/*.csv 2>/dev/null | wc -l)
+[ -f "$RAW/bouts.txt" ] && echo "Walk log: $(grep -vc '^#' "$RAW/bouts.txt") walks in $RAW/bouts.txt"
 echo "Recordings: $n on the laptop ($new new) in $RAW"
 [ "$n" -gt 0 ] || { echo "Nothing recorded yet: Settings > Calibrate & record a walk."; exit 0; }
 

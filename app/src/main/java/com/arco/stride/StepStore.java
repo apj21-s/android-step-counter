@@ -57,6 +57,7 @@ public final class StepStore {
             o.put("amoled", p.getBoolean("amoled", false));
             o.put("haptics", p.getBoolean("haptics", true));
             o.put("boost", boost(c));
+            o.put("walklog", prefs(c).getBoolean("walkLog", false));
             o.put("wstyle", style(c));
             o.put("accent", p.getString("accent", "#dc143c"));
             String source = StepEngine.source(c);
