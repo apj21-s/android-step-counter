@@ -9,8 +9,19 @@ android {
         versionCode 4
         versionName '3.1'
     }
+    // Always the same key (see ~/Documents/stride-keys/README.txt): phones only accept updates signed
+    // with the key they were installed with. If the file is missing the build stops instead of
+    // quietly signing with a new key.
+    signingConfigs {
+        stride {
+            storeFile file(System.getProperty('user.home') + '/Documents/stride-keys/stride.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
     buildTypes {
-        release { minifyEnabled false; signingConfig signingConfigs.debug }
+        release { minifyEnabled false; signingConfig signingConfigs.stride }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     testOptions { unitTests { includeAndroidResources = true } }
